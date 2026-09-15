@@ -6,11 +6,8 @@ const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// Serve static frontend files from public folder
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Initialize Discord Client
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -23,32 +20,56 @@ const client = new Client({
 });
 
 const GUILD_ID = process.env.GUILD_ID;
+
+// In-memory data stores
 const modmailThreads = new Map();
+const chatLogs = []; // Stores recent guild messages
 
-// Capture incoming Direct Messages from users
+// Event: Capture Guild Chat Logs & Modmail DMs
 client.on('messageCreate', async (message) => {
-  if (message.author.bot || message.guild) return;
+  if (message.author.bot) return;
 
-  const userId = message.author.id;
+  // 1. Direct Messages (Modmail)
+  if (!message.guild) {
+    const userId = message.author.id;
 
-  if (!modmailThreads.has(userId)) {
-    modmailThreads.set(userId, {
-      username: message.author.tag,
-      avatar: message.author.displayAvatarURL({ extension: 'png' }),
-      messages: [],
+    if (!modmailThreads.has(userId)) {
+      modmailThreads.set(userId, {
+        username: message.author.tag,
+        avatar: message.author.displayAvatarURL({ extension: 'png' }),
+        messages: [],
+      });
+    }
+
+    const thread = modmailThreads.get(userId);
+    thread.messages.push({
+      sender: message.author.username,
+      content: message.content,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type: 'incoming',
     });
+    return;
   }
 
-  const thread = modmailThreads.get(userId);
-  thread.messages.push({
-    sender: message.author.username,
-    content: message.content,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    type: 'incoming',
-  });
+  // 2. Server Channel Messages (Chat Logs)
+  if (message.guild.id === GUILD_ID) {
+    chatLogs.unshift({
+      id: message.id,
+      user: message.author.tag,
+      avatar: message.author.displayAvatarURL({ extension: 'png' }),
+      channel: `#${message.channel.name}`,
+      content: message.content || '[Attachment/Embed]',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
+
+    // Keep log buffer to last 100 messages
+    if (chatLogs.length > 100) chatLogs.pop();
+  }
 });
 
-// API Routes
+// --- API ENDPOINTS ---
+
+// Check Bot Status
 app.get('/api/status', (req, res) => {
   res.json({
     online: client.isReady(),
@@ -57,28 +78,40 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// Moderation Actions: Ban & Kick
 app.post('/api/moderate', async (req, res) => {
   const { action, userId, reason } = req.body;
-  if (!userId || !reason) return res.status(400).json({ error: 'Missing userId or reason' });
+  if (!userId || !reason) return res.status(400).json({ error: 'Missing target User ID or reason.' });
 
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
-    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!guild) return res.status(404).json({ error: 'Guild not found. Check your GUILD_ID env variable.' });
 
     if (action === 'Ban member') {
       await guild.members.ban(userId, { reason });
-      return res.json({ success: true, message: `Banned user ${userId}` });
-    } else if (action === 'Kick member') {
-      if (!member) return res.status(404).json({ error: 'Member not found in server' });
+      return res.json({ success: true, message: `Successfully banned user ${userId}` });
+    } 
+    
+    if (action === 'Kick member') {
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (!member) return res.status(404).json({ error: 'Member is not in this server.' });
       await member.kick(reason);
-      return res.json({ success: true, message: `Kicked user ${userId}` });
+      return res.json({ success: true, message: `Successfully kicked ${member.user.tag}` });
     }
-    return res.status(400).json({ error: 'Invalid action type' });
+
+    return res.status(400).json({ error: 'Invalid moderation action specified.' });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    console.error('Moderation error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to execute moderation action.' });
   }
 });
 
+// Chat Logs API
+app.get('/api/logs', (req, res) => {
+  res.json(chatLogs);
+});
+
+// Modmail: Fetch Threads
 app.get('/api/modmail', (req, res) => {
   const threads = Array.from(modmailThreads.entries()).map(([userId, data]) => ({
     userId,
@@ -90,13 +123,14 @@ app.get('/api/modmail', (req, res) => {
   res.json(threads);
 });
 
+// Modmail: Reply to DM
 app.post('/api/modmail/reply', async (req, res) => {
   const { userId, message } = req.body;
-  if (!userId || !message) return res.status(400).json({ error: 'Missing userId or message' });
+  if (!userId || !message) return res.status(400).json({ error: 'Missing userId or message payload.' });
 
   try {
     const user = await client.users.fetch(userId);
-    await user.send(`**[Modmail Reply]:** ${message}`);
+    await user.send(`**[Support Team]:** ${message}`);
 
     if (modmailThreads.has(userId)) {
       modmailThreads.get(userId).messages.push({
@@ -107,18 +141,21 @@ app.post('/api/modmail/reply', async (req, res) => {
       });
     }
 
-    res.json({ success: true, message: 'Reply sent to user DM' });
+    res.json({ success: true, message: 'Message delivered to user DM.' });
   } catch (err) {
-    res.status(500).json({ error: 'Could not DM user. DMs may be closed.' });
+    console.error('Modmail send error:', err);
+    res.status(500).json({ error: 'Could not send DM. User may have DMs disabled.' });
   }
 });
 
-// Fallback to serve index.html
+// Catch-all route to serve dashboard HTML
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
 client.login(process.env.DISCORD_TOKEN).then(() => {
-  app.listen(PORT, () => console.log(`API running on port ${PORT}`));
+  app.listen(PORT, () => console.log(`Sentinel API running on port ${PORT}`));
+}).catch(err => {
+  console.error('Failed to log in to Discord:', err);
 });
