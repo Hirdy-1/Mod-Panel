@@ -3,150 +3,109 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moderation Panel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <title>Sentinel | Command Center</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app-shell">
-    <aside class="sidebar" id="sidebar">
-      <div class="brand"><div class="brand-mark">S</div><div><strong>Femboy Hangout</strong><span>Moderation suite</span></div></div>
-      <div class="server-picker"><div class="server-icon">N</div><div><small>ACTIVE SERVER</small><b>Femboy Hangout Community</b></div><span>⌄</span></div>
+  <!-- AUTH WALL -->
+  <div id="authScreen" class="modal-backdrop show" style="background:#151827;">
+    <div class="modal" style="text-align:center;">
+      <h2>Sentinel Dashboard</h2>
+      <p style="color:#737b94; margin-bottom: 20px;">Please login with your Discord Account to verify Moderator access.</p>
+      <a href="/api/auth/login" class="primary-btn" style="display:inline-block; text-decoration:none;">Login with Discord →</a>
+    </div>
+  </div>
+
+  <div class="app-shell" id="appShell" style="display:none;">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">S</div><div><strong>Sentinel</strong><span>Moderation Suite</span></div></div>
       <nav>
         <p class="nav-label">WORKSPACE</p>
         <a class="nav-item active" href="#overview" data-section="overview"><i>▦</i>Overview</a>
-        <a class="nav-item" href="#logs" data-section="logs"><i>☷</i>Chat logs</a>
-        <a class="nav-item" href="#modmail" data-section="modmail"><i>✉</i>Modmail</a>
-        <a class="nav-item" href="#actions" data-section="actions"><i>⚡</i>Mod Actions</a>
+        <a class="nav-item" href="#members" data-section="members"><i>👥</i>Members</a>
+        <a class="nav-item" href="#logs" data-section="logs"><i>☷</i>Chat Logs</a>
+        <a class="nav-item" href="#broadcast" data-section="broadcast"><i>📣</i>Broadcast</a>
+        <a class="nav-item" href="#settings" data-section="settings"><i>⚙</i>Auto-Mod Settings</a>
       </nav>
-      <div class="sidebar-footer">
-        <div class="online-dot"></div>
-        <div><b>Bot Connected</b><small id="botPing">Latency --ms</small></div>
-      </div>
     </aside>
 
     <main class="main-content">
       <header class="topbar">
-        <button class="menu-btn" id="menuBtn">☰</button>
-        <div class="crumbs">Femboy Hangout Community <span>/</span> <b id="pageName">Overview</b></div>
+        <div class="crumbs">Sentinel Panel / <b id="pageName">Overview</b></div>
+        <div class="top-actions">
+          <span id="userTag" style="font-weight:600; font-size:12px;">Logged in</span>
+          <button id="logoutBtn" class="secondary-btn">Logout</button>
+        </div>
       </header>
 
-      <!-- OVERVIEW SECTION WITH STAT COUNTERS -->
+      <!-- MEMBERS TAB WITH REAL-TIME PROFILE & QUICK ACTIONS -->
+      <section class="page-section" id="members">
+        <div class="page-heading"><div><p class="eyebrow">ROSTER</p><h1>Server Members</h1></div></div>
+        <div class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>USER</th><th>ROLES</th><th>JOINED</th><th>WARNS</th><th>ACTIONS</th></tr></thead>
+              <tbody id="membersTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- AUTO-MOD SETTINGS TAB -->
+      <section class="page-section" id="settings">
+        <div class="page-heading"><div><p class="eyebrow">AUTOMATION</p><h1>Auto-Moderation Settings</h1></div></div>
+        <div class="settings-grid">
+          <div class="panel setting-card">
+            <h3>Automated Rules</h3>
+            <label class="switch-label"><input type="checkbox" id="antiInviteToggle" /> Block Discord Invite Links</label>
+            <label class="switch-label"><input type="checkbox" id="antiSpamToggle" /> Anti-Spam Auto-Mute</label>
+            <label>Max Warnings Before Ban
+              <input type="number" id="maxWarnsInput" value="3" min="1" max="10" />
+            </label>
+          </div>
+          <div class="panel setting-card">
+            <h3>Banned Vocabulary</h3>
+            <label>Forbidden Words (Comma separated)
+              <textarea id="bannedWordsInput" style="height:100px;"></textarea>
+            </label>
+            <button class="primary-btn" id="saveSettingsBtn">Save Auto-Mod Settings</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- BROADCAST / DIRECT ANNOUNCEMENTS TAB -->
+      <section class="page-section" id="broadcast">
+        <div class="page-heading"><div><p class="eyebrow">COMMUNICATION</p><h1>Server Broadcast & Warn</h1></div></div>
+        <div class="settings-grid">
+          <div class="panel setting-card">
+            <h3>Channel Announcement</h3>
+            <label>Channel ID<input id="broadcastChannel" placeholder="e.g. 1048...892" /></label>
+            <label>Title<input id="broadcastTitle" placeholder="Announcement Title" /></label>
+            <label>Message<textarea id="broadcastBody" placeholder="Embed content..."></textarea></label>
+            <button class="primary-btn" id="sendBroadcastBtn">Send Embed Announcement</button>
+          </div>
+          <div class="panel setting-card">
+            <h3>Direct DM Warning</h3>
+            <label>Target User ID<input id="warnUserId" placeholder="Target Discord User ID" /></label>
+            <label>Reason<textarea id="warnReason" placeholder="Reason for warning..."></textarea></label>
+            <button class="danger-btn" id="sendWarnBtn">Issue Official DM Warning</button>
+          </div>
+        </div>
+      </section>
+      
+      <!-- OVERVIEW & LOGS -->
       <section class="page-section active" id="overview">
-        <div class="page-heading">
-          <div><p class="eyebrow">DASHBOARD</p><h1>Overview <span>👋</span></h1></div>
-          <button class="primary-btn" data-open-modal="actionModal">＋ New action</button>
-        </div>
-
         <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-icon blue">👥</div>
-            <div>
-              <span>TOTAL MEMBERS</span>
-              <strong id="statTotalMembers">--</strong>
-              <small>Excludes bots</small>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon green">🟢</div>
-            <div>
-              <span>MEMBERS ONLINE</span>
-              <strong id="statOnlineMembers">--</strong>
-              <small class="positive">Active non-bot users</small>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon red">⊘</div>
-            <div>
-              <span>TOTAL BANS</span>
-              <strong id="statTotalBans">--</strong>
-              <small class="negative">Server ban list count</small>
-            </div>
-          </div>
-        </div>
-
-        <div class="content-grid">
-          <div class="panel quick-panel">
-            <div class="panel-header"><h2>Quick Actions</h2></div>
-            <button class="quick-btn" data-open-modal="actionModal">
-              <span class="quick-icon red">⚡</span>
-              <span><b>Ban or Kick Member</b><small>Execute live moderation</small></span>
-              <span>→</span>
-            </button>
-          </div>
+          <div class="stat-card"><div class="stat-icon blue">👥</div><div><span>TOTAL HUMANS</span><strong id="statTotalMembers">--</strong></div></div>
+          <div class="stat-card"><div class="stat-icon green">🟢</div><div><span>ONLINE HUMANS</span><strong id="statOnlineMembers">--</strong></div></div>
+          <div class="stat-card"><div class="stat-icon red">⊘</div><div><span>SERVER BANS</span><strong id="statTotalBans">--</strong></div></div>
         </div>
       </section>
-
-      <!-- CHAT LOGS SECTION -->
       <section class="page-section" id="logs">
-        <div class="page-heading"><div><p class="eyebrow">AUDIT TRAIL</p><h1>Chat logs</h1></div></div>
-        <div class="panel">
-          <div class="toolbar"><input id="logSearch" type="search" placeholder="Search messages or users..." /></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th>USER</th><th>CHANNEL</th><th>MESSAGE</th><th>TIME</th></tr>
-              </thead>
-              <tbody id="logsTable">
-                <tr><td colspan="4" style="text-align:center;">Loading logs...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <!-- MODMAIL SECTION -->
-      <section class="page-section" id="modmail">
-        <div class="page-heading"><div><p class="eyebrow">PRIVATE SUPPORT</p><h1>Modmail</h1></div></div>
-        <div class="mail-layout panel">
-          <div class="mail-list" id="modmailList"></div>
-          <div class="conversation">
-            <div class="conversation-head" id="conversationHead"><h3>Select a conversation</h3></div>
-            <div class="messages" id="messageList"></div>
-            <div class="reply-box">
-              <textarea placeholder="Write a reply..."></textarea>
-              <div><span class="muted">Sent directly to member's DM</span><button class="primary-btn" id="sendReply">Send reply →</button></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- MODERATION ACTION HISTORY (ADDED FEATURE) -->
-      <section class="page-section" id="actions">
-        <div class="page-heading">
-          <div><p class="eyebrow">AUDIT LOG</p><h1>Dashboard Action History</h1></div>
-          <button class="primary-btn" data-open-modal="actionModal">＋ Take Action</button>
-        </div>
-        <div class="panel">
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>ACTION</th><th>TARGET</th><th>REASON</th><th>TIME</th></tr></thead>
-              <tbody id="actionHistoryTable">
-                <tr><td colspan="4" style="text-align:center;">No moderation actions recorded this session.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <div class="panel"><div class="table-wrap"><table><tbody id="logsTable"></tbody></table></div></div>
       </section>
     </main>
   </div>
-
-  <div class="modal-backdrop" id="actionModal">
-    <div class="modal">
-      <button class="close-modal">×</button>
-      <h2>Take Action</h2>
-      <label>Action<select id="actionType"><option>Ban member</option><option>Kick member</option></select></label>
-      <label>User ID<input id="memberInput" placeholder="Discord User ID" /></label>
-      <label>Reason<textarea id="reasonInput" placeholder="Reason for action..."></textarea></label>
-      <div class="modal-actions">
-        <button class="secondary-btn close-modal">Cancel</button>
-        <button class="danger-btn" id="confirmAction">Confirm</button>
-      </div>
-    </div>
-  </div>
-
   <div class="toast" id="toast"></div>
   <script src="script.js"></script>
 </body>
