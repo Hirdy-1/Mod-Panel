@@ -13,6 +13,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildPresences,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent,
   ],
@@ -23,13 +24,14 @@ const GUILD_ID = process.env.GUILD_ID;
 
 // In-memory data stores
 const modmailThreads = new Map();
-const chatLogs = []; // Stores recent guild messages
+const chatLogs = [];
+const actionLogs = []; // Audit log for dashboard kicks/bans
 
 // Event: Capture Guild Chat Logs & Modmail DMs
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  // 1. Direct Messages (Modmail)
+  // Direct Messages (Modmail)
   if (!message.guild) {
     const userId = message.author.id;
 
@@ -51,7 +53,7 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // 2. Server Channel Messages (Chat Logs)
+  // Server Channel Messages
   if (message.guild.id === GUILD_ID) {
     chatLogs.unshift({
       id: message.id,
@@ -62,20 +64,41 @@ client.on('messageCreate', async (message) => {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     });
 
-    // Keep log buffer to last 100 messages
     if (chatLogs.length > 100) chatLogs.pop();
   }
 });
 
 // --- API ENDPOINTS ---
 
-// Check Bot Status
-app.get('/api/status', (req, res) => {
-  res.json({
-    online: client.isReady(),
-    ping: client.ws.ping,
-    guilds: client.guilds.cache.size,
-  });
+// Server Stats Endpoint (Members, Online non-bots, Bans)
+app.get('/api/stats', async (req, res) => {
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    if (!guild) return res.status(404).json({ error: 'Guild not found' });
+
+    // Fetch all members to accurately filter bots
+    const members = await guild.members.fetch();
+    const humanMembers = members.filter(m => !m.user.bot);
+    
+    const totalHumans = humanMembers.size;
+    const onlineHumans = humanMembers.filter(m => 
+      m.presence && ['online', 'idle', 'dnd'].includes(m.presence.status)
+    ).size;
+
+    // Fetch Ban Count
+    const bans = await guild.bans.fetch().catch(() => new Map());
+    const banCount = bans.size;
+
+    res.json({
+      totalMembers: totalHumans,
+      onlineMembers: onlineHumans,
+      totalBans: banCount,
+      ping: client.ws.ping
+    });
+  } catch (error) {
+    console.error('Stats fetch error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Moderation Actions: Ban & Kick
@@ -85,33 +108,47 @@ app.post('/api/moderate', async (req, res) => {
 
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
-    if (!guild) return res.status(404).json({ error: 'Guild not found. Check your GUILD_ID env variable.' });
+    if (!guild) return res.status(404).json({ error: 'Guild not found.' });
 
     if (action === 'Ban member') {
       await guild.members.ban(userId, { reason });
+      actionLogs.unshift({
+        type: 'Ban',
+        target: userId,
+        reason,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      });
       return res.json({ success: true, message: `Successfully banned user ${userId}` });
     } 
     
     if (action === 'Kick member') {
       const member = await guild.members.fetch(userId).catch(() => null);
       if (!member) return res.status(404).json({ error: 'Member is not in this server.' });
+      
+      const tag = member.user.tag;
       await member.kick(reason);
-      return res.json({ success: true, message: `Successfully kicked ${member.user.tag}` });
+      
+      actionLogs.unshift({
+        type: 'Kick',
+        target: tag,
+        reason,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      });
+      return res.json({ success: true, message: `Successfully kicked ${tag}` });
     }
 
-    return res.status(400).json({ error: 'Invalid moderation action specified.' });
+    return res.status(400).json({ error: 'Invalid action type.' });
   } catch (error) {
     console.error('Moderation error:', error);
     return res.status(500).json({ error: error.message || 'Failed to execute moderation action.' });
   }
 });
 
-// Chat Logs API
-app.get('/api/logs', (req, res) => {
-  res.json(chatLogs);
-});
+// Logs & History Endpoints
+app.get('/api/logs', (req, res) => res.json(chatLogs));
+app.get('/api/action-history', (req, res) => res.json(actionLogs));
 
-// Modmail: Fetch Threads
+// Modmail Endpoints
 app.get('/api/modmail', (req, res) => {
   const threads = Array.from(modmailThreads.entries()).map(([userId, data]) => ({
     userId,
@@ -123,7 +160,6 @@ app.get('/api/modmail', (req, res) => {
   res.json(threads);
 });
 
-// Modmail: Reply to DM
 app.post('/api/modmail/reply', async (req, res) => {
   const { userId, message } = req.body;
   if (!userId || !message) return res.status(400).json({ error: 'Missing userId or message payload.' });
@@ -143,12 +179,10 @@ app.post('/api/modmail/reply', async (req, res) => {
 
     res.json({ success: true, message: 'Message delivered to user DM.' });
   } catch (err) {
-    console.error('Modmail send error:', err);
     res.status(500).json({ error: 'Could not send DM. User may have DMs disabled.' });
   }
 });
 
-// Catch-all route to serve dashboard HTML
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -156,6 +190,4 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3000;
 client.login(process.env.DISCORD_TOKEN).then(() => {
   app.listen(PORT, () => console.log(`Sentinel API running on port ${PORT}`));
-}).catch(err => {
-  console.error('Failed to log in to Discord:', err);
 });
