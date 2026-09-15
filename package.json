@@ -1,15 +1,31 @@
 {
-  "name": "sentinel-bot-dashboard",
+  "name": "sentinel-dashboard",
   "version": "1.0.0",
-  "description": "Discord Bot and Moderation Dashboard",
+  "description": "Discord Bot Moderation Dashboard & Command Center",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
+  "keywords": [
+    "discord",
+    "bot",
+    "dashboard",
+    "moderation",
+    "express"
+  ],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",
-    "discord.js": "^14.14.1",
-    "express": "^4.18.2"
+    "discord.js": "^14.18.0",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
-"express-session": "^1.17.3"
