@@ -1,10 +1,9 @@
-// Set relative API route since frontend and backend are hosted together
 const API_BASE_URL = window.location.origin;
 
 let currentModmailThreads = [];
 let activeUserId = null;
 
-// Navigation Routing
+// Routing logic
 const sections = document.querySelectorAll('.page-section');
 const navItems = document.querySelectorAll('[data-section]');
 const pageName = document.getElementById('pageName');
@@ -24,36 +23,27 @@ navItems.forEach(item => item.addEventListener('click', e => {
 const initialSection = window.location.hash.slice(1);
 if (document.getElementById(initialSection)) showSection(initialSection);
 
-// Modal Controls
+// Toast Notification
+function toast(msg) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// Modal controls
 const modal = document.getElementById('actionModal');
 document.querySelectorAll('[data-open-modal="actionModal"]').forEach(b => b.addEventListener('click', () => modal.classList.add('show')));
 document.querySelectorAll('.close-modal').forEach(b => b.addEventListener('click', () => modal.classList.remove('show')));
 
-function toast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2800);
-}
-
-// Check Backend Connection Status
-document.getElementById('testConnection')?.addEventListener('click', async () => {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/status`);
-    const data = await res.json();
-    toast(data.online ? `Connected! Ping: ${data.ping}ms` : 'Bot offline.');
-  } catch {
-    toast('API connection failed.');
-  }
-});
-
-// Moderation Actions (Ban/Kick)
+// --- 1. MODERATION ACTIONS (BAN / KICK) ---
 document.getElementById('confirmAction')?.addEventListener('click', async () => {
   const userId = document.getElementById('memberInput').value.trim();
   const reason = document.getElementById('reasonInput').value.trim();
   const action = document.getElementById('actionType').value;
 
-  if (!userId || !reason) return toast('Missing ID or reason.');
+  if (!userId || !reason) return toast('Please enter a User ID and Reason.');
 
   try {
     const res = await fetch(`${API_BASE_URL}/api/moderate`, {
@@ -62,14 +52,57 @@ document.getElementById('confirmAction')?.addEventListener('click', async () => 
       body: JSON.stringify({ action, userId, reason }),
     });
     const result = await res.json();
-    toast(res.ok ? result.message : `Error: ${result.error}`);
-    if (res.ok) modal.classList.remove('show');
+    
+    if (res.ok) {
+      toast(result.message);
+      modal.classList.remove('show');
+      document.getElementById('memberInput').value = '';
+      document.getElementById('reasonInput').value = '';
+    } else {
+      toast(`Error: ${result.error}`);
+    }
   } catch {
-    toast('Network request failed.');
+    toast('Network error executing moderation action.');
   }
 });
 
-// Fetch & Render Modmail Threads
+// --- 2. LIVE CHAT LOGS ---
+async function loadChatLogs() {
+  const tableBody = document.getElementById('logsTable');
+  if (!tableBody) return;
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/logs`);
+    if (!res.ok) return;
+    const logs = await res.json();
+
+    if (logs.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:#8b94a7;">No recent messages logged yet. Send a message in Discord!</td></tr>';
+      return;
+    }
+
+    const searchVal = (document.getElementById('logSearch')?.value || '').toLowerCase();
+    const filtered = logs.filter(l => l.user.toLowerCase().includes(searchVal) || l.content.toLowerCase().includes(searchVal));
+
+    tableBody.innerHTML = filtered.map(log => `
+      <tr>
+        <td style="display:flex; align-items:center; gap:8px;">
+          <img src="${log.avatar}" style="width:24px; height:24px; border-radius:50%;" />
+          <b>${log.user}</b>
+        </td>
+        <td class="channel">${log.channel}</td>
+        <td>${log.content}</td>
+        <td><small>${log.timestamp}</small></td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    console.error('Error fetching logs:', e);
+  }
+}
+
+document.getElementById('logSearch')?.addEventListener('input', loadChatLogs);
+
+// --- 3. DISCORD MODMAIL SYSTEM ---
 async function loadModmailThreads() {
   try {
     const res = await fetch(`${API_BASE_URL}/api/modmail`);
@@ -78,7 +111,7 @@ async function loadModmailThreads() {
     renderModmailList(currentModmailThreads);
     if (activeUserId) selectThread(activeUserId);
   } catch (e) {
-    console.error(e);
+    console.error('Error loading modmail:', e);
   }
 }
 
@@ -87,7 +120,7 @@ function renderModmailList(threads) {
   if (!container) return;
 
   if (threads.length === 0) {
-    container.innerHTML = '<div style="padding: 20px; color: #8b94a7;">No active Modmail DMs</div>';
+    container.innerHTML = '<div style="padding: 20px; color: #8b94a7; text-align:center;">No active DM threads</div>';
     return;
   }
 
@@ -96,7 +129,7 @@ function renderModmailList(threads) {
       <img src="${t.avatar}" style="width:31px; height:31px; border-radius:50%;" />
       <div>
         <b>${t.username}</b>
-        <p>${t.lastMessage ? t.lastMessage.content : 'No messages'}</p>
+        <p>${t.lastMessage ? t.lastMessage.content : ''}</p>
         <small>${t.lastMessage ? t.lastMessage.timestamp : ''}</small>
       </div>
     </div>
@@ -116,7 +149,7 @@ function selectThread(userId) {
     <img src="${thread.avatar}" style="width:31px; height:31px; border-radius:50%;" />
     <div>
       <h3>${thread.username}</h3>
-      <span class="muted">ID: ${thread.userId}</span>
+      <span class="muted">User ID: ${thread.userId}</span>
     </div>
   `;
 
@@ -133,11 +166,11 @@ function selectThread(userId) {
 
 // Send Modmail Reply
 document.getElementById('sendReply')?.addEventListener('click', async () => {
-  if (!activeUserId) return toast('Select a thread first.');
+  if (!activeUserId) return toast('Select a thread to reply.');
   const textarea = document.querySelector('.reply-box textarea');
   const message = textarea.value.trim();
 
-  if (!message) return toast('Write a message first.');
+  if (!message) return toast('Enter a message first.');
 
   try {
     const res = await fetch(`${API_BASE_URL}/api/modmail/reply`, {
@@ -146,19 +179,25 @@ document.getElementById('sendReply')?.addEventListener('click', async () => {
       body: JSON.stringify({ userId: activeUserId, message }),
     });
 
+    const data = await res.json();
     if (res.ok) {
-      toast('Reply sent to Discord DM');
+      toast('Reply delivered to user DM');
       textarea.value = '';
       loadModmailThreads();
     } else {
-      const err = await res.json();
-      toast(`Error: ${err.error}`);
+      toast(`Error: ${data.error}`);
     }
   } catch {
     toast('Failed to send reply.');
   }
 });
 
-// Poll for incoming messages every 4 seconds
-setInterval(loadModmailThreads, 4000);
+// Setup Polling (Updates chat & modmail every 3 seconds)
+setInterval(() => {
+  loadModmailThreads();
+  loadChatLogs();
+}, 3000);
+
+// Initial Load
 loadModmailThreads();
+loadChatLogs();
