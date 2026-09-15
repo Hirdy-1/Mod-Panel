@@ -5,17 +5,26 @@ const session = require('express-session');
 const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
 
 const app = express();
+
+// --- MIDDLEWARE SETUP ---
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.urlencoded({ extended: true }));
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'sentinel-super-secret-key',
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false } // Set to true if using HTTPS on production
+  cookie: { 
+    secure: false, // Set to true if running behind a reverse proxy/HTTPS strictly
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
 }));
 
+// Serve static assets from the 'public' folder
+app.use(express.static(path.join(__dirname, 'public')));
+
+// --- DISCORD CLIENT INITIALIZATION ---
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -31,7 +40,7 @@ const client = new Client({
 const GUILD_ID = process.env.GUILD_ID;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-const REDIRECT_URI = process.env.REDIRECT_URI || 'http://localhost:3000/api/auth/callback';
+const REDIRECT_URI = process.env.REDIRECT_URI;
 
 // Dynamic Auto-Mod & Config Settings
 const botSettings = {
@@ -41,91 +50,116 @@ const botSettings = {
   maxWarningsBeforeBan: 3,
 };
 
-// In-Memory Data Stores
+// In-Memory Stores
 const modmailThreads = new Map();
 const chatLogs = [];
 const actionLogs = [];
-const userWarnings = new Map(); // Tracks warning count per user ID
-const userSpamCache = new Map(); // Tracks message timestamps per user
+const userWarnings = new Map();
+const userSpamCache = new Map();
 
-// Auth Middleware
+// Authentication Guard Middleware
 function requireAuth(req, res, next) {
-  if (!req.session.user) return res.status(401).json({ error: 'Unauthorized. Please login.' });
+  if (!req.session || !req.session.user) {
+    return res.status(401).json({ error: 'Unauthorized. Please login with Discord.' });
+  }
   next();
 }
 
-// --- DISCORD AUTO-MOD & SPAM ENGINE ---
+// --- DISCORD EVENT LISTENERS ---
+
 client.on('messageCreate', async (message) => {
-  if (message.author.bot || !message.guild || message.guild.id !== GUILD_ID) return;
+  if (message.author.bot) return;
 
-  const content = message.content;
-  const userId = message.author.id;
-  const member = message.member;
+  // Modmail (DM Handling)
+  if (!message.guild) {
+    const userId = message.author.id;
+    if (!modmailThreads.has(userId)) {
+      modmailThreads.set(userId, {
+        username: message.author.tag,
+        avatar: message.author.displayAvatarURL({ extension: 'png' }),
+        messages: [],
+      });
+    }
 
-  // 1. Anti-Invite Filter
-  if (botSettings.antiInvite && /(discord\.gg|discord\.com\/invite)\//i.test(content)) {
-    await message.delete().catch(() => {});
-    await issueWarning(member, 'Posting Discord Invite Links');
+    const thread = modmailThreads.get(userId);
+    thread.messages.push({
+      sender: message.author.username,
+      content: message.content,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type: 'incoming',
+    });
     return;
   }
 
-  // 2. Banned Words Filter
-  const containsBanned = botSettings.bannedWords.some(word => 
-    content.toLowerCase().includes(word.toLowerCase())
-  );
-  if (containsBanned) {
-    await message.delete().catch(() => {});
-    await issueWarning(member, 'Using Banned Vocabulary');
-    return;
-  }
+  // Guild Specific Moderation & Logging
+  if (message.guild.id === GUILD_ID) {
+    const content = message.content;
+    const userId = message.author.id;
+    const member = message.member;
 
-  // 3. Anti-Spam Filter (5 messages within 3 seconds)
-  if (botSettings.antiSpam) {
-    const now = Date.now();
-    const timestamps = userSpamCache.get(userId) || [];
-    timestamps.push(now);
-    const recent = timestamps.filter(t => now - t < 3000);
-    userSpamCache.set(userId, recent);
-
-    if (recent.length >= 5) {
+    // 1. Anti-Invite Filter
+    if (botSettings.antiInvite && /(discord\.gg|discord\.com\/invite)\//i.test(content)) {
       await message.delete().catch(() => {});
-      userSpamCache.set(userId, []);
-      await issueWarning(member, 'Rapid Message Spamming');
+      if (member) await issueWarning(member, 'Posting Discord Invite Links');
       return;
     }
-  }
 
-  // Normal Chat Logging
-  chatLogs.unshift({
-    id: message.id,
-    user: message.author.tag,
-    avatar: message.author.displayAvatarURL({ extension: 'png' }),
-    channel: `#${message.channel.name}`,
-    content: content || '[Media/Embed]',
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-  });
-  if (chatLogs.length > 100) chatLogs.pop();
+    // 2. Banned Words Filter
+    const containsBanned = botSettings.bannedWords.some(word => 
+      word.length > 0 && content.toLowerCase().includes(word.toLowerCase())
+    );
+    if (containsBanned) {
+      await message.delete().catch(() => {});
+      if (member) await issueWarning(member, 'Using Banned Vocabulary');
+      return;
+    }
+
+    // 3. Anti-Spam Filter (5 messages within 3 seconds)
+    if (botSettings.antiSpam) {
+      const now = Date.now();
+      const timestamps = userSpamCache.get(userId) || [];
+      timestamps.push(now);
+      const recent = timestamps.filter(t => now - t < 3000);
+      userSpamCache.set(userId, recent);
+
+      if (recent.length >= 5) {
+        await message.delete().catch(() => {});
+        userSpamCache.set(userId, []);
+        if (member) await issueWarning(member, 'Rapid Message Spamming');
+        return;
+      }
+    }
+
+    // Chat Logger
+    chatLogs.unshift({
+      id: message.id,
+      user: message.author.tag,
+      avatar: message.author.displayAvatarURL({ extension: 'png' }),
+      channel: `#${message.channel.name}`,
+      content: content || '[Media/Embed]',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
+    if (chatLogs.length > 100) chatLogs.pop();
+  }
 });
 
-// Helper Function: Issue Warnings & Trigger Auto-Actions
+// Warning System Helper
 async function issueWarning(member, reason) {
   const userId = member.id;
   const currentWarns = (userWarnings.get(userId) || 0) + 1;
   userWarnings.set(userId, currentWarns);
 
-  // Send Warning DM
-  await member.send(`⚠️ **Warning from Server Moderation**\nReason: ${reason}\nTotal Warnings: ${currentWarns}/${botSettings.maxWarningsBeforeBan}`).catch(() => {});
+  await member.send(`⚠️ **Warning from Moderation**\nReason: ${reason}\nWarnings: ${currentWarns}/${botSettings.maxWarningsBeforeBan}`).catch(() => {});
 
   actionLogs.unshift({
     type: 'Warning',
     target: member.user.tag,
-    reason: `${reason} (Warning #${currentWarns})`,
+    reason: `${reason} (Warn #${currentWarns})`,
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   });
 
-  // Threshold Check -> Escalation
   if (currentWarns >= botSettings.maxWarningsBeforeBan) {
-    await member.guild.members.ban(userId, { reason: `Auto-Ban: Reached ${botSettings.maxWarningsBeforeBan} warnings.` }).catch(() => {});
+    await member.guild.members.ban(userId, { reason: `Auto-Ban: Exceeded ${botSettings.maxWarningsBeforeBan} warnings.` }).catch(() => {});
     userWarnings.delete(userId);
     actionLogs.unshift({
       type: 'Auto-Ban',
@@ -136,7 +170,8 @@ async function issueWarning(member, reason) {
   }
 }
 
-// --- DISCORD OAUTH2 ROUTES ---
+// --- DISCORD OAUTH2 AUTHENTICATION ROUTES ---
+
 app.get('/api/auth/login', (req, res) => {
   const redirect = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
   res.redirect(redirect);
@@ -144,7 +179,7 @@ app.get('/api/auth/login', (req, res) => {
 
 app.get('/api/auth/callback', async (req, res) => {
   const { code } = req.query;
-  if (!code) return res.redirect('/?error=no_code');
+  if (!code) return res.status(400).send('No authorization code provided.');
 
   try {
     const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
@@ -159,31 +194,37 @@ app.get('/api/auth/callback', async (req, res) => {
       }),
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
+
     const tokens = await tokenResponse.json();
+
+    if (!tokens.access_token) {
+      console.error('OAuth token exchange failed:', tokens);
+      return res.status(400).send('Failed to exchange code. Check CLIENT_SECRET and REDIRECT_URI.');
+    }
 
     const userRes = await fetch('https://discord.com/api/users/@me', {
       headers: { authorization: `${tokens.token_type} ${tokens.access_token}` },
     });
     const user = await userRes.json();
 
-    // Verify Admin/Mod permissions in specified guild
+    // Verify Admin/Mod status inside target server
     const guild = await client.guilds.fetch(GUILD_ID);
     const member = await guild.members.fetch(user.id).catch(() => null);
 
     if (!member || (!member.permissions.has('Administrator') && !member.permissions.has('ManageMessages'))) {
-      return res.send('<h2>Access Denied: You must be an Administrator or Moderator to view this panel.</h2>');
+      return res.status(403).send('<h2>Access Denied: You need Administrator or Moderator permissions to access this panel.</h2>');
     }
 
     req.session.user = { id: user.id, username: user.username, avatar: user.avatar };
     res.redirect('/');
   } catch (err) {
-    console.error('OAuth error:', err);
-    res.redirect('/?error=auth_failed');
+    console.error('OAuth processing error:', err);
+    res.status(500).send('Authentication Error: ' + err.message);
   }
 });
 
 app.get('/api/auth/me', (req, res) => {
-  res.json({ authenticated: !!req.session.user, user: req.session.user || null });
+  res.json({ authenticated: !!(req.session && req.session.user), user: req.session?.user || null });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -191,7 +232,7 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// --- API ENDPOINTS ---
+// --- DASHBOARD API ENDPOINTS ---
 
 app.get('/api/stats', requireAuth, async (req, res) => {
   try {
@@ -211,7 +252,6 @@ app.get('/api/stats', requireAuth, async (req, res) => {
   }
 });
 
-// Real-Time Member List & Profiles
 app.get('/api/members', requireAuth, async (req, res) => {
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
@@ -224,7 +264,6 @@ app.get('/api/members', requireAuth, async (req, res) => {
       isBot: m.user.bot,
       roles: m.roles.cache.filter(r => r.name !== '@everyone').map(r => ({ name: r.name, color: r.hexColor })),
       joinedAt: m.joinedAt ? m.joinedAt.toLocaleDateString() : 'Unknown',
-      createdAt: m.user.createdAt.toLocaleDateString(),
       warnings: userWarnings.get(m.id) || 0,
     }));
 
@@ -234,75 +273,26 @@ app.get('/api/members', requireAuth, async (req, res) => {
   }
 });
 
-// Broadcast Channel Announcement
-app.post('/api/broadcast', requireAuth, async (req, res) => {
-  const { channelId, title, message } = req.body;
-  if (!channelId || !message) return res.status(400).json({ error: 'Missing channel or message body.' });
-
-  try {
-    const channel = await client.channels.fetch(channelId);
-    if (!channel || !channel.isTextBased()) return res.status(400).json({ error: 'Invalid channel ID.' });
-
-    const embed = new EmbedBuilder()
-      .setTitle(title || 'Server Announcement')
-      .setDescription(message)
-      .setColor('#635bff')
-      .setTimestamp();
-
-    await channel.send({ embeds: [embed] });
-    res.json({ success: true, message: `Announcement published to #${channel.name}` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Direct Warning DM
-app.post('/api/warn', requireAuth, async (req, res) => {
-  const { userId, reason } = req.body;
-  if (!userId || !reason) return res.status(400).json({ error: 'Missing user ID or reason.' });
-
-  try {
-    const guild = await client.guilds.fetch(GUILD_ID);
-    const member = await guild.members.fetch(userId);
-    await issueWarning(member, reason);
-    res.json({ success: true, message: `Direct warning sent to ${member.user.tag}` });
-  } catch (err) {
-    res.status(500).json({ error: 'Could not warn member: ' + err.message });
-  }
-});
-
-// Auto-Mod Settings Endpoint
-app.get('/api/settings', requireAuth, (req, res) => res.json(botSettings));
-app.post('/api/settings', requireAuth, (req, res) => {
-  const { bannedWords, antiInvite, antiSpam, maxWarningsBeforeBan } = req.body;
-  if (Array.isArray(bannedWords)) botSettings.bannedWords = bannedWords;
-  if (typeof antiInvite === 'boolean') botSettings.antiInvite = antiInvite;
-  if (typeof antiSpam === 'boolean') botSettings.antiSpam = antiSpam;
-  if (maxWarningsBeforeBan) botSettings.maxWarningsBeforeBan = Number(maxWarningsBeforeBan);
-  res.json({ success: true, settings: botSettings });
-});
-
-// Quick Actions Endpoint (Timeout / Ban / Kick)
 app.post('/api/moderate', requireAuth, async (req, res) => {
   const { action, userId, reason, durationMinutes } = req.body;
-  if (!userId || !reason) return res.status(400).json({ error: 'Missing parameters.' });
+  if (!userId || !reason) return res.status(400).json({ error: 'Missing target User ID or reason.' });
 
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
-    const member = await guild.members.fetch(userId).catch(() => null);
 
     if (action === 'Ban member') {
       await guild.members.ban(userId, { reason });
       actionLogs.unshift({ type: 'Ban', target: userId, reason, timestamp: new Date().toLocaleTimeString() });
-      return res.json({ success: true, message: `Banned user ${userId}` });
+      return res.json({ success: true, message: `Successfully banned user ID ${userId}` });
     }
 
-    if (!member) return res.status(404).json({ error: 'Member not found.' });
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) return res.status(404).json({ error: 'Member is not in this server.' });
 
     if (action === 'Kick member') {
       await member.kick(reason);
       actionLogs.unshift({ type: 'Kick', target: member.user.tag, reason, timestamp: new Date().toLocaleTimeString() });
-      return res.json({ success: true, message: `Kicked ${member.user.tag}` });
+      return res.json({ success: true, message: `Successfully kicked ${member.user.tag}` });
     }
 
     if (action === 'Timeout member') {
@@ -318,10 +308,96 @@ app.post('/api/moderate', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/settings', requireAuth, (req, res) => res.json(botSettings));
+
+app.post('/api/settings', requireAuth, (req, res) => {
+  const { bannedWords, antiInvite, antiSpam, maxWarningsBeforeBan } = req.body;
+  if (Array.isArray(bannedWords)) botSettings.bannedWords = bannedWords;
+  if (typeof antiInvite === 'boolean') botSettings.antiInvite = antiInvite;
+  if (typeof antiSpam === 'boolean') botSettings.antiSpam = antiSpam;
+  if (maxWarningsBeforeBan) botSettings.maxWarningsBeforeBan = Number(maxWarningsBeforeBan);
+  res.json({ success: true, settings: botSettings });
+});
+
+app.post('/api/broadcast', requireAuth, async (req, res) => {
+  const { channelId, title, message } = req.body;
+  if (!channelId || !message) return res.status(400).json({ error: 'Missing channel or message text.' });
+
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased()) return res.status(400).json({ error: 'Target channel is invalid or non-text.' });
+
+    const embed = new EmbedBuilder()
+      .setTitle(title || 'Server Announcement')
+      .setDescription(message)
+      .setColor('#635bff')
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+    res.json({ success: true, message: `Announcement sent to #${channel.name}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/warn', requireAuth, async (req, res) => {
+  const { userId, reason } = req.body;
+  if (!userId || !reason) return res.status(400).json({ error: 'Missing user ID or reason.' });
+
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const member = await guild.members.fetch(userId);
+    await issueWarning(member, reason);
+    res.json({ success: true, message: `Issued warning DM to ${member.user.tag}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not send warning: ' + err.message });
+  }
+});
+
 app.get('/api/logs', requireAuth, (req, res) => res.json(chatLogs));
 app.get('/api/action-history', requireAuth, (req, res) => res.json(actionLogs));
 
+app.get('/api/modmail', requireAuth, (req, res) => {
+  const threads = Array.from(modmailThreads.entries()).map(([userId, data]) => ({
+    userId,
+    username: data.username,
+    avatar: data.avatar,
+    lastMessage: data.messages[data.messages.length - 1],
+    messages: data.messages,
+  }));
+  res.json(threads);
+});
+
+app.post('/api/modmail/reply', requireAuth, async (req, res) => {
+  const { userId, message } = req.body;
+  if (!userId || !message) return res.status(400).json({ error: 'Missing userId or message body.' });
+
+  try {
+    const user = await client.users.fetch(userId);
+    await user.send(`**[Support Team]:** ${message}`);
+
+    if (modmailThreads.has(userId)) {
+      modmailThreads.get(userId).messages.push({
+        sender: 'Moderator',
+        content: message,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        type: 'outgoing',
+      });
+    }
+
+    res.json({ success: true, message: 'Reply sent to user DM.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not deliver DM. User may have direct messages closed.' });
+  }
+});
+
+// --- WILDCARD CATCH-ALL ROUTE (MUST STAY AT THE BOTTOM) ---
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// --- START SERVER ---
 const PORT = process.env.PORT || 3000;
 client.login(process.env.DISCORD_TOKEN).then(() => {
-  app.listen(PORT, () => console.log(`Sentinel System online on port ${PORT}`));
+  app.listen(PORT, () => console.log(`Sentinel API & Bot running on port ${PORT}`));
 });
