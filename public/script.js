@@ -23,7 +23,6 @@ navItems.forEach(item => item.addEventListener('click', e => {
 const initialSection = window.location.hash.slice(1);
 if (document.getElementById(initialSection)) showSection(initialSection);
 
-// Toast Notification
 function toast(msg) {
   const t = document.getElementById('toast');
   if (!t) return;
@@ -37,7 +36,23 @@ const modal = document.getElementById('actionModal');
 document.querySelectorAll('[data-open-modal="actionModal"]').forEach(b => b.addEventListener('click', () => modal.classList.add('show')));
 document.querySelectorAll('.close-modal').forEach(b => b.addEventListener('click', () => modal.classList.remove('show')));
 
-// --- 1. MODERATION ACTIONS (BAN / KICK) ---
+// --- FETCH SERVER STATS (Members, Online, Bans) ---
+async function fetchStats() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/stats`);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    document.getElementById('statTotalMembers').textContent = data.totalMembers ?? '--';
+    document.getElementById('statOnlineMembers').textContent = data.onlineMembers ?? '--';
+    document.getElementById('statTotalBans').textContent = data.totalBans ?? '--';
+    document.getElementById('botPing').textContent = `Latency ${data.ping}ms`;
+  } catch (e) {
+    console.error('Stats update error:', e);
+  }
+}
+
+// --- MODERATION ACTIONS ---
 document.getElementById('confirmAction')?.addEventListener('click', async () => {
   const userId = document.getElementById('memberInput').value.trim();
   const reason = document.getElementById('reasonInput').value.trim();
@@ -58,6 +73,8 @@ document.getElementById('confirmAction')?.addEventListener('click', async () => 
       modal.classList.remove('show');
       document.getElementById('memberInput').value = '';
       document.getElementById('reasonInput').value = '';
+      fetchStats();
+      fetchActionHistory();
     } else {
       toast(`Error: ${result.error}`);
     }
@@ -66,7 +83,35 @@ document.getElementById('confirmAction')?.addEventListener('click', async () => 
   }
 });
 
-// --- 2. LIVE CHAT LOGS ---
+// --- FETCH MODERATION ACTION HISTORY ---
+async function fetchActionHistory() {
+  const table = document.getElementById('actionHistoryTable');
+  if (!table) return;
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/action-history`);
+    if (!res.ok) return;
+    const actions = await res.json();
+
+    if (actions.length === 0) {
+      table.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#8b94a7;">No actions recorded this session.</td></tr>';
+      return;
+    }
+
+    table.innerHTML = actions.map(a => `
+      <tr>
+        <td><span class="pill ${a.type === 'Ban' ? 'banned' : 'pending'}">${a.type}</span></td>
+        <td><b>${a.target}</b></td>
+        <td>${a.reason}</td>
+        <td><small>${a.timestamp}</small></td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    console.error('Action log error:', e);
+  }
+}
+
+// --- LIVE CHAT LOGS ---
 async function loadChatLogs() {
   const tableBody = document.getElementById('logsTable');
   if (!tableBody) return;
@@ -77,7 +122,7 @@ async function loadChatLogs() {
     const logs = await res.json();
 
     if (logs.length === 0) {
-      tableBody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:#8b94a7;">No recent messages logged yet. Send a message in Discord!</td></tr>';
+      tableBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#8b94a7;">No recent messages logged yet.</td></tr>';
       return;
     }
 
@@ -102,7 +147,7 @@ async function loadChatLogs() {
 
 document.getElementById('logSearch')?.addEventListener('input', loadChatLogs);
 
-// --- 3. DISCORD MODMAIL SYSTEM ---
+// --- MODMAIL ---
 async function loadModmailThreads() {
   try {
     const res = await fetch(`${API_BASE_URL}/api/modmail`);
@@ -164,7 +209,6 @@ function selectThread(userId) {
   msgContainer.scrollTop = msgContainer.scrollHeight;
 }
 
-// Send Modmail Reply
 document.getElementById('sendReply')?.addEventListener('click', async () => {
   if (!activeUserId) return toast('Select a thread to reply.');
   const textarea = document.querySelector('.reply-box textarea');
@@ -192,12 +236,16 @@ document.getElementById('sendReply')?.addEventListener('click', async () => {
   }
 });
 
-// Setup Polling (Updates chat & modmail every 3 seconds)
+// Periodic Polling
 setInterval(() => {
+  fetchStats();
   loadModmailThreads();
   loadChatLogs();
-}, 3000);
+  fetchActionHistory();
+}, 4000);
 
 // Initial Load
+fetchStats();
 loadModmailThreads();
 loadChatLogs();
+fetchActionHistory();
