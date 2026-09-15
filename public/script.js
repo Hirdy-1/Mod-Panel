@@ -1,27 +1,24 @@
 const API_BASE_URL = window.location.origin;
 
-let currentModmailThreads = [];
-let activeUserId = null;
-
-// Routing logic
-const sections = document.querySelectorAll('.page-section');
-const navItems = document.querySelectorAll('[data-section]');
-const pageName = document.getElementById('pageName');
-
-function showSection(id) {
-  sections.forEach(s => s.classList.toggle('active', s.id === id));
-  navItems.forEach(n => n.classList.toggle('active', n.dataset.section === id));
-  if (pageName) pageName.textContent = id.toUpperCase();
-  window.location.hash = id;
+// Auth Verification Flow
+async function checkAuth() {
+  const res = await fetch(`${API_BASE_URL}/api/auth/me`);
+  const data = await res.json();
+  if (data.authenticated) {
+    document.getElementById('authScreen').classList.remove('show');
+    document.getElementById('appShell').style.display = 'flex';
+    document.getElementById('userTag').textContent = `@${data.user.username}`;
+    initDashboard();
+  } else {
+    document.getElementById('authScreen').classList.add('show');
+    document.getElementById('appShell').style.display = 'none';
+  }
 }
 
-navItems.forEach(item => item.addEventListener('click', e => {
-  e.preventDefault();
-  showSection(item.dataset.section);
-}));
-
-const initialSection = window.location.hash.slice(1);
-if (document.getElementById(initialSection)) showSection(initialSection);
+document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+  await fetch(`${API_BASE_URL}/api/auth/logout`, { method: 'POST' });
+  location.reload();
+});
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -31,221 +28,121 @@ function toast(msg) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-// Modal controls
-const modal = document.getElementById('actionModal');
-document.querySelectorAll('[data-open-modal="actionModal"]').forEach(b => b.addEventListener('click', () => modal.classList.add('show')));
-document.querySelectorAll('.close-modal').forEach(b => b.addEventListener('click', () => modal.classList.remove('show')));
-
-// --- FETCH SERVER STATS (Members, Online, Bans) ---
-async function fetchStats() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/stats`);
-    if (!res.ok) return;
-    const data = await res.json();
-
-    document.getElementById('statTotalMembers').textContent = data.totalMembers ?? '--';
-    document.getElementById('statOnlineMembers').textContent = data.onlineMembers ?? '--';
-    document.getElementById('statTotalBans').textContent = data.totalBans ?? '--';
-    document.getElementById('botPing').textContent = `Latency ${data.ping}ms`;
-  } catch (e) {
-    console.error('Stats update error:', e);
-  }
-}
-
-// --- MODERATION ACTIONS ---
-document.getElementById('confirmAction')?.addEventListener('click', async () => {
-  const userId = document.getElementById('memberInput').value.trim();
-  const reason = document.getElementById('reasonInput').value.trim();
-  const action = document.getElementById('actionType').value;
-
-  if (!userId || !reason) return toast('Please enter a User ID and Reason.');
-
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/moderate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, userId, reason }),
-    });
-    const result = await res.json();
-    
-    if (res.ok) {
-      toast(result.message);
-      modal.classList.remove('show');
-      document.getElementById('memberInput').value = '';
-      document.getElementById('reasonInput').value = '';
-      fetchStats();
-      fetchActionHistory();
-    } else {
-      toast(`Error: ${result.error}`);
-    }
-  } catch {
-    toast('Network error executing moderation action.');
-  }
-});
-
-// --- FETCH MODERATION ACTION HISTORY ---
-async function fetchActionHistory() {
-  const table = document.getElementById('actionHistoryTable');
+// 1. Fetch & Render Member Roster with Quick Action Buttons
+async function loadMembers() {
+  const table = document.getElementById('membersTable');
   if (!table) return;
 
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/action-history`);
-    if (!res.ok) return;
-    const actions = await res.json();
+  const res = await fetch(`${API_BASE_URL}/api/members`);
+  if (!res.ok) return;
+  const members = await res.json();
 
-    if (actions.length === 0) {
-      table.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#8b94a7;">No actions recorded this session.</td></tr>';
-      return;
-    }
-
-    table.innerHTML = actions.map(a => `
-      <tr>
-        <td><span class="pill ${a.type === 'Ban' ? 'banned' : 'pending'}">${a.type}</span></td>
-        <td><b>${a.target}</b></td>
-        <td>${a.reason}</td>
-        <td><small>${a.timestamp}</small></td>
-      </tr>
-    `).join('');
-  } catch (e) {
-    console.error('Action log error:', e);
-  }
-}
-
-// --- LIVE CHAT LOGS ---
-async function loadChatLogs() {
-  const tableBody = document.getElementById('logsTable');
-  if (!tableBody) return;
-
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/logs`);
-    if (!res.ok) return;
-    const logs = await res.json();
-
-    if (logs.length === 0) {
-      tableBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#8b94a7;">No recent messages logged yet.</td></tr>';
-      return;
-    }
-
-    const searchVal = (document.getElementById('logSearch')?.value || '').toLowerCase();
-    const filtered = logs.filter(l => l.user.toLowerCase().includes(searchVal) || l.content.toLowerCase().includes(searchVal));
-
-    tableBody.innerHTML = filtered.map(log => `
-      <tr>
-        <td style="display:flex; align-items:center; gap:8px;">
-          <img src="${log.avatar}" style="width:24px; height:24px; border-radius:50%;" />
-          <b>${log.user}</b>
-        </td>
-        <td class="channel">${log.channel}</td>
-        <td>${log.content}</td>
-        <td><small>${log.timestamp}</small></td>
-      </tr>
-    `).join('');
-  } catch (e) {
-    console.error('Error fetching logs:', e);
-  }
-}
-
-document.getElementById('logSearch')?.addEventListener('input', loadChatLogs);
-
-// --- MODMAIL ---
-async function loadModmailThreads() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/modmail`);
-    if (!res.ok) return;
-    currentModmailThreads = await res.json();
-    renderModmailList(currentModmailThreads);
-    if (activeUserId) selectThread(activeUserId);
-  } catch (e) {
-    console.error('Error loading modmail:', e);
-  }
-}
-
-function renderModmailList(threads) {
-  const container = document.getElementById('modmailList');
-  if (!container) return;
-
-  if (threads.length === 0) {
-    container.innerHTML = '<div style="padding: 20px; color: #8b94a7; text-align:center;">No active DM threads</div>';
-    return;
-  }
-
-  container.innerHTML = threads.map(t => `
-    <div class="mail-item ${t.userId === activeUserId ? 'selected' : ''}" data-userid="${t.userId}">
-      <img src="${t.avatar}" style="width:31px; height:31px; border-radius:50%;" />
-      <div>
-        <b>${t.username}</b>
-        <p>${t.lastMessage ? t.lastMessage.content : ''}</p>
-        <small>${t.lastMessage ? t.lastMessage.timestamp : ''}</small>
-      </div>
-    </div>
+  table.innerHTML = members.map(m => `
+    <tr>
+      <td style="display:flex; align-items:center; gap:8px;">
+        <img src="${m.avatar}" style="width:28px; height:28px; border-radius:50%;" />
+        <div><b>${m.username}</b><br><small style="color:#8b94a7;">ID: ${m.id}</small></div>
+      </td>
+      <td>${m.roles.map(r => `<span class="pill" style="background:${r.color}22; color:${r.color};">${r.name}</span>`).join(' ')}</td>
+      <td><small>${m.joinedAt}</small></td>
+      <td><b>${m.warnings}</b></td>
+      <td>
+        <button class="secondary-btn" onclick="quickAction('Timeout member', '${m.id}')">Timeout</button>
+        <button class="secondary-btn" onclick="quickAction('Kick member', '${m.id}')">Kick</button>
+        <button class="danger-btn" onclick="quickAction('Ban member', '${m.id}')">Ban</button>
+      </td>
+    </tr>
   `).join('');
+}
 
-  document.querySelectorAll('.mail-item').forEach(item => {
-    item.addEventListener('click', () => selectThread(item.dataset.userid));
+async function quickAction(action, userId) {
+  const reason = prompt(`Reason for ${action}:`);
+  if (!reason) return;
+
+  let durationMinutes = 10;
+  if (action === 'Timeout member') {
+    durationMinutes = prompt('Timeout duration in minutes:', '10') || 10;
+  }
+
+  const res = await fetch(`${API_BASE_URL}/api/moderate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, userId, reason, durationMinutes }),
   });
+  const data = await res.json();
+  toast(res.ok ? data.message : `Error: ${data.error}`);
+  loadMembers();
 }
 
-function selectThread(userId) {
-  activeUserId = userId;
-  const thread = currentModmailThreads.find(t => t.userId === userId);
-  if (!thread) return;
+// 2. Load & Save Auto-Mod Settings
+async function loadSettings() {
+  const res = await fetch(`${API_BASE_URL}/api/settings`);
+  if (!res.ok) return;
+  const s = await res.json();
 
-  document.getElementById('conversationHead').innerHTML = `
-    <img src="${thread.avatar}" style="width:31px; height:31px; border-radius:50%;" />
-    <div>
-      <h3>${thread.username}</h3>
-      <span class="muted">User ID: ${thread.userId}</span>
-    </div>
-  `;
-
-  const msgContainer = document.getElementById('messageList');
-  msgContainer.innerHTML = thread.messages.map(m => `
-    <div class="message ${m.type === 'incoming' ? 'incoming' : 'outgoing'}">
-      <p>${m.content}</p>
-      <small>${m.sender} · ${m.timestamp}</small>
-    </div>
-  `).join('');
-
-  msgContainer.scrollTop = msgContainer.scrollHeight;
+  document.getElementById('antiInviteToggle').checked = s.antiInvite;
+  document.getElementById('antiSpamToggle').checked = s.antiSpam;
+  document.getElementById('maxWarnsInput').value = s.maxWarningsBeforeBan;
+  document.getElementById('bannedWordsInput').value = s.bannedWords.join(', ');
 }
 
-document.getElementById('sendReply')?.addEventListener('click', async () => {
-  if (!activeUserId) return toast('Select a thread to reply.');
-  const textarea = document.querySelector('.reply-box textarea');
-  const message = textarea.value.trim();
+document.getElementById('saveSettingsBtn')?.addEventListener('click', async () => {
+  const payload = {
+    antiInvite: document.getElementById('antiInviteToggle').checked,
+    antiSpam: document.getElementById('antiSpamToggle').checked,
+    maxWarningsBeforeBan: document.getElementById('maxWarnsInput').value,
+    bannedWords: document.getElementById('bannedWordsInput').value.split(',').map(w => w.trim()).filter(Boolean)
+  };
 
-  if (!message) return toast('Enter a message first.');
-
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/modmail/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: activeUserId, message }),
-    });
-
-    const data = await res.json();
-    if (res.ok) {
-      toast('Reply delivered to user DM');
-      textarea.value = '';
-      loadModmailThreads();
-    } else {
-      toast(`Error: ${data.error}`);
-    }
-  } catch {
-    toast('Failed to send reply.');
-  }
+  const res = await fetch(`${API_BASE_URL}/api/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (res.ok) toast('Auto-Mod configuration saved.');
 });
 
-// Periodic Polling
-setInterval(() => {
-  fetchStats();
-  loadModmailThreads();
-  loadChatLogs();
-  fetchActionHistory();
-}, 4000);
+// 3. Broadcast Announcement
+document.getElementById('sendBroadcastBtn')?.addEventListener('click', async () => {
+  const channelId = document.getElementById('broadcastChannel').value.trim();
+  const title = document.getElementById('broadcastTitle').value.trim();
+  const message = document.getElementById('broadcastBody').value.trim();
 
-// Initial Load
-fetchStats();
-loadModmailThreads();
-loadChatLogs();
-fetchActionHistory();
+  const res = await fetch(`${API_BASE_URL}/api/broadcast`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channelId, title, message }),
+  });
+  const data = await res.json();
+  toast(res.ok ? data.message : `Error: ${data.error}`);
+});
+
+// 4. Issue Direct Warning DM
+document.getElementById('sendWarnBtn')?.addEventListener('click', async () => {
+  const userId = document.getElementById('warnUserId').value.trim();
+  const reason = document.getElementById('warnReason').value.trim();
+
+  const res = await fetch(`${API_BASE_URL}/api/warn`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, reason }),
+  });
+  const data = await res.json();
+  toast(res.ok ? data.message : `Error: ${data.error}`);
+});
+
+// Navigation Tabs
+const navItems = document.querySelectorAll('[data-section]');
+navItems.forEach(item => item.addEventListener('click', e => {
+  e.preventDefault();
+  const target = item.dataset.section;
+  document.querySelectorAll('.page-section').forEach(s => s.classList.toggle('active', s.id === target));
+  navItems.forEach(n => n.classList.toggle('active', n.dataset.section === target));
+}));
+
+function initDashboard() {
+  loadMembers();
+  loadSettings();
+}
+
+checkAuth();
