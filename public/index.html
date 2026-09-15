@@ -17,28 +17,87 @@
       <nav>
         <p class="nav-label">WORKSPACE</p>
         <a class="nav-item active" href="#overview" data-section="overview"><i>▦</i>Overview</a>
-        <a class="nav-item" href="#members" data-section="members"><i>♙</i>Members</a>
         <a class="nav-item" href="#logs" data-section="logs"><i>☷</i>Chat logs</a>
-        <a class="nav-item" href="#tickets" data-section="tickets"><i>▢</i>Tickets <em>4</em></a>
         <a class="nav-item" href="#modmail" data-section="modmail"><i>✉</i>Modmail</a>
-        <p class="nav-label">MANAGEMENT</p>
-        <a class="nav-item" href="#actions" data-section="actions"><i>⚡</i>Moderation actions</a>
-        <a class="nav-item" href="#settings" data-section="settings"><i>⚙</i>Bot settings</a>
+        <a class="nav-item" href="#actions" data-section="actions"><i>⚡</i>Mod Actions</a>
       </nav>
-      <div class="sidebar-footer"><div class="online-dot"></div><div><b>Bot connected</b><small>Latency 42ms</small></div><button id="disconnectBtn" title="Toggle bot status">•••</button></div>
+      <div class="sidebar-footer">
+        <div class="online-dot"></div>
+        <div><b>Bot Connected</b><small id="botPing">Latency --ms</small></div>
+      </div>
     </aside>
 
     <main class="main-content">
-      <header class="topbar"><button class="menu-btn" id="menuBtn">☰</button><div class="crumbs">Nightfall Community <span>/</span> <b id="pageName">Overview</b></div><div class="top-actions"><button class="icon-btn" title="Notifications">♧<span class="notification-dot"></span></button><div class="profile"><div class="avatar purple">JD</div><div><b>Jordan Davis</b><small>Administrator</small></div><span>⌄</span></div></div></header>
+      <header class="topbar">
+        <button class="menu-btn" id="menuBtn">☰</button>
+        <div class="crumbs">Nightfall Community <span>/</span> <b id="pageName">Overview</b></div>
+      </header>
 
+      <!-- OVERVIEW SECTION WITH STAT COUNTERS -->
       <section class="page-section active" id="overview">
-        <div class="page-heading"><div><p class="eyebrow">DASHBOARD</p><h1>Overview <span>👋</span></h1></div><button class="primary-btn" data-open-modal="actionModal">＋ New action</button></div>
-        <div class="content-grid"><div class="panel quick-panel"><div class="panel-header"><div><h2>Quick actions</h2></div></div><button class="quick-btn" data-open-modal="actionModal"><span class="quick-icon red">⊘</span><span><b>Ban or Kick Member</b><small>Perform live server moderation</small></span><span>→</span></button></div></div>
+        <div class="page-heading">
+          <div><p class="eyebrow">DASHBOARD</p><h1>Overview <span>👋</span></h1></div>
+          <button class="primary-btn" data-open-modal="actionModal">＋ New action</button>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon blue">👥</div>
+            <div>
+              <span>TOTAL MEMBERS</span>
+              <strong id="statTotalMembers">--</strong>
+              <small>Excludes bots</small>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon green">🟢</div>
+            <div>
+              <span>MEMBERS ONLINE</span>
+              <strong id="statOnlineMembers">--</strong>
+              <small class="positive">Active non-bot users</small>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon red">⊘</div>
+            <div>
+              <span>TOTAL BANS</span>
+              <strong id="statTotalBans">--</strong>
+              <small class="negative">Server ban list count</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="content-grid">
+          <div class="panel quick-panel">
+            <div class="panel-header"><h2>Quick Actions</h2></div>
+            <button class="quick-btn" data-open-modal="actionModal">
+              <span class="quick-icon red">⚡</span>
+              <span><b>Ban or Kick Member</b><small>Execute live moderation</small></span>
+              <span>→</span>
+            </button>
+          </div>
+        </div>
       </section>
 
-      <section class="page-section" id="logs"><div class="page-heading"><div><p class="eyebrow">AUDIT TRAIL</p><h1>Chat logs</h1></div></div><div class="panel"><div class="toolbar"><input id="logSearch" type="search" placeholder="Search messages..." /></div><div class="table-wrap"><table><tbody id="logsTable"><tr><td><b>System Log</b></td><td>Logged in to backend.</td></tr></tbody></table></div></div></section>
-      <section class="page-section" id="tickets"><div class="page-heading"><div><p class="eyebrow">SUPPORT DESK</p><h1>Tickets</h1></div></div></section>
+      <!-- CHAT LOGS SECTION -->
+      <section class="page-section" id="logs">
+        <div class="page-heading"><div><p class="eyebrow">AUDIT TRAIL</p><h1>Chat logs</h1></div></div>
+        <div class="panel">
+          <div class="toolbar"><input id="logSearch" type="search" placeholder="Search messages or users..." /></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>USER</th><th>CHANNEL</th><th>MESSAGE</th><th>TIME</th></tr>
+              </thead>
+              <tbody id="logsTable">
+                <tr><td colspan="4" style="text-align:center;">Loading logs...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
+      <!-- MODMAIL SECTION -->
       <section class="page-section" id="modmail">
         <div class="page-heading"><div><p class="eyebrow">PRIVATE SUPPORT</p><h1>Modmail</h1></div></div>
         <div class="mail-layout panel">
@@ -48,23 +107,46 @@
             <div class="messages" id="messageList"></div>
             <div class="reply-box">
               <textarea placeholder="Write a reply..."></textarea>
-              <div><span class="muted">Replies are sent through Discord bot DM</span><button class="primary-btn" id="sendReply">Send reply →</button></div>
+              <div><span class="muted">Sent directly to member's DM</span><button class="primary-btn" id="sendReply">Send reply →</button></div>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="page-section" id="members"><div class="page-heading"><div><p class="eyebrow">COMMUNITY</p><h1>Members</h1></div></div></section>
-      <section class="page-section" id="actions"><div class="page-heading"><div><p class="eyebrow">MODERATION</p><h1>Actions</h1></div></div><button class="primary-btn" data-open-modal="actionModal">Start action</button></section>
-
-      <section class="page-section" id="settings">
-        <div class="page-heading"><div><p class="eyebrow">CONFIGURATION</p><h1>Bot settings</h1></div></div>
-        <div class="settings-grid"><div class="panel setting-card"><h3>Discord status</h3><button class="secondary-btn" id="testConnection">Test connection</button></div></div>
+      <!-- MODERATION ACTION HISTORY (ADDED FEATURE) -->
+      <section class="page-section" id="actions">
+        <div class="page-heading">
+          <div><p class="eyebrow">AUDIT LOG</p><h1>Dashboard Action History</h1></div>
+          <button class="primary-btn" data-open-modal="actionModal">＋ Take Action</button>
+        </div>
+        <div class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ACTION</th><th>TARGET</th><th>REASON</th><th>TIME</th></tr></thead>
+              <tbody id="actionHistoryTable">
+                <tr><td colspan="4" style="text-align:center;">No moderation actions recorded this session.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>
     </main>
   </div>
 
-  <div class="modal-backdrop" id="actionModal"><div class="modal"><button class="close-modal">×</button><h2>Take action</h2><label>Action<select id="actionType"><option>Ban member</option><option>Kick member</option></select></label><label>User ID<input id="memberInput" placeholder="User ID" /></label><label>Reason<textarea id="reasonInput" placeholder="Reason..."></textarea></label><div class="modal-actions"><button class="secondary-btn close-modal">Cancel</button><button class="danger-btn" id="confirmAction">Confirm</button></div></div></div>
+  <div class="modal-backdrop" id="actionModal">
+    <div class="modal">
+      <button class="close-modal">×</button>
+      <h2>Take Action</h2>
+      <label>Action<select id="actionType"><option>Ban member</option><option>Kick member</option></select></label>
+      <label>User ID<input id="memberInput" placeholder="Discord User ID" /></label>
+      <label>Reason<textarea id="reasonInput" placeholder="Reason for action..."></textarea></label>
+      <div class="modal-actions">
+        <button class="secondary-btn close-modal">Cancel</button>
+        <button class="danger-btn" id="confirmAction">Confirm</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
   <script src="script.js"></script>
 </body>
