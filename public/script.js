@@ -1,15 +1,20 @@
 const API_BASE_URL = window.location.origin;
 
-// Auth Verification Flow
+// --- AUTHENTICATION FLOW ---
 async function checkAuth() {
-  const res = await fetch(`${API_BASE_URL}/api/auth/me`);
-  const data = await res.json();
-  if (data.authenticated) {
-    document.getElementById('authScreen').classList.remove('show');
-    document.getElementById('appShell').style.display = 'flex';
-    document.getElementById('userTag').textContent = `@${data.user.username}`;
-    initDashboard();
-  } else {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/auth/me`);
+    const data = await res.json();
+    if (data.authenticated) {
+      document.getElementById('authScreen').classList.remove('show');
+      document.getElementById('appShell').style.display = 'flex';
+      document.getElementById('userTag').textContent = `@${data.user.username}`;
+      initDashboard();
+    } else {
+      document.getElementById('authScreen').classList.add('show');
+      document.getElementById('appShell').style.display = 'none';
+    }
+  } catch (err) {
     document.getElementById('authScreen').classList.add('show');
     document.getElementById('appShell').style.display = 'none';
   }
@@ -28,7 +33,18 @@ function toast(msg) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-// 1. Fetch & Render Member Roster with Quick Action Buttons
+// --- 1. OVERVIEW METRICS ---
+async function loadStats() {
+  const res = await fetch(`${API_BASE_URL}/api/stats`);
+  if (!res.ok) return;
+  const data = await res.json();
+
+  document.getElementById('statTotalMembers').textContent = data.totalMembers ?? '--';
+  document.getElementById('statOnlineMembers').textContent = data.onlineMembers ?? '--';
+  document.getElementById('statTotalBans').textContent = data.totalBans ?? '--';
+}
+
+// --- 2. MEMBER ROSTER & QUICK ACTIONS ---
 async function loadMembers() {
   const table = document.getElementById('membersTable');
   if (!table) return;
@@ -67,14 +83,52 @@ async function quickAction(action, userId) {
   const res = await fetch(`${API_BASE_URL}/api/moderate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, userId, reason, durationMinutes }),
+    body: JSON.stringify({ action, userId, reason, durationMinutes: Number(durationMinutes) }),
   });
   const data = await res.json();
   toast(res.ok ? data.message : `Error: ${data.error}`);
   loadMembers();
+  loadLogs();
 }
 
-// 2. Load & Save Auto-Mod Settings
+// --- 3. CHAT & ACTION LOGS ---
+async function loadLogs() {
+  // Chat Logs
+  const chatRes = await fetch(`${API_BASE_URL}/api/logs`);
+  if (chatRes.ok) {
+    const chatLogs = await chatRes.json();
+    const chatTable = document.getElementById('logsTable');
+    if (chatTable) {
+      chatTable.innerHTML = chatLogs.map(l => `
+        <tr>
+          <td><small>${l.timestamp}</small></td>
+          <td><b>${l.user}</b></td>
+          <td><code>${l.channel}</code></td>
+          <td>${l.content}</td>
+        </tr>
+      `).join('');
+    }
+  }
+
+  // Action Logs
+  const actionRes = await fetch(`${API_BASE_URL}/api/action-history`);
+  if (actionRes.ok) {
+    const actionLogs = await actionRes.json();
+    const actionTable = document.getElementById('actionLogsTable');
+    if (actionTable) {
+      actionTable.innerHTML = actionLogs.map(a => `
+        <tr>
+          <td><small>${a.timestamp}</small></td>
+          <td><span class="pill">${a.type}</span></td>
+          <td><b>${a.target}</b></td>
+          <td>${a.reason}</td>
+        </tr>
+      `).join('');
+    }
+  }
+}
+
+// --- 4. AUTO-MOD SETTINGS ---
 async function loadSettings() {
   const res = await fetch(`${API_BASE_URL}/api/settings`);
   if (!res.ok) return;
@@ -90,7 +144,7 @@ document.getElementById('saveSettingsBtn')?.addEventListener('click', async () =
   const payload = {
     antiInvite: document.getElementById('antiInviteToggle').checked,
     antiSpam: document.getElementById('antiSpamToggle').checked,
-    maxWarningsBeforeBan: document.getElementById('maxWarnsInput').value,
+    maxWarningsBeforeBan: Number(document.getElementById('maxWarnsInput').value),
     bannedWords: document.getElementById('bannedWordsInput').value.split(',').map(w => w.trim()).filter(Boolean)
   };
 
@@ -102,7 +156,7 @@ document.getElementById('saveSettingsBtn')?.addEventListener('click', async () =
   if (res.ok) toast('Auto-Mod configuration saved.');
 });
 
-// 3. Broadcast Announcement
+// --- 5. BROADCAST & DIRECT WARN ---
 document.getElementById('sendBroadcastBtn')?.addEventListener('click', async () => {
   const channelId = document.getElementById('broadcastChannel').value.trim();
   const title = document.getElementById('broadcastTitle').value.trim();
@@ -117,7 +171,6 @@ document.getElementById('sendBroadcastBtn')?.addEventListener('click', async () 
   toast(res.ok ? data.message : `Error: ${data.error}`);
 });
 
-// 4. Issue Direct Warning DM
 document.getElementById('sendWarnBtn')?.addEventListener('click', async () => {
   const userId = document.getElementById('warnUserId').value.trim();
   const reason = document.getElementById('warnReason').value.trim();
@@ -129,20 +182,31 @@ document.getElementById('sendWarnBtn')?.addEventListener('click', async () => {
   });
   const data = await res.json();
   toast(res.ok ? data.message : `Error: ${data.error}`);
+  loadMembers();
 });
 
-// Navigation Tabs
+// --- NAVIGATION HANDLER ---
 const navItems = document.querySelectorAll('[data-section]');
 navItems.forEach(item => item.addEventListener('click', e => {
   e.preventDefault();
   const target = item.dataset.section;
+  
   document.querySelectorAll('.page-section').forEach(s => s.classList.toggle('active', s.id === target));
   navItems.forEach(n => n.classList.toggle('active', n.dataset.section === target));
+  
+  const pageName = document.getElementById('pageName');
+  if (pageName) pageName.textContent = item.textContent.replace(/[^a-zA-Z\s]/g, '').trim();
+
+  if (target === 'logs') loadLogs();
+  if (target === 'overview') loadStats();
 }));
 
+// --- INITIALIZE DASHBOARD ---
 function initDashboard() {
+  loadStats();
   loadMembers();
   loadSettings();
+  loadLogs();
 }
 
 checkAuth();
