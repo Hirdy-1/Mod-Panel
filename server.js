@@ -2,11 +2,11 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const session = require('express-session');
-const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, AuditLogEvent } = require('discord.js');
 
 const app = express();
 
-// --- CRITICAL FOR RENDER REVERSE PROXIES ---
+// --- REVERSE PROXY CONFIG (RENDER) ---
 app.set('trust proxy', 1);
 
 // --- MIDDLEWARE SETUP ---
@@ -24,7 +24,6 @@ app.use(session({
   }
 }));
 
-// Serve static files from 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- DISCORD CLIENT SETUP ---
@@ -36,16 +35,22 @@ const client = new Client({
     GatewayIntentBits.GuildPresences,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildModeration
   ],
   partials: [Partials.Channel, Partials.Message],
 });
 
+// Environment Variables
 const GUILD_ID = process.env.GUILD_ID;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 
-// State Configuration
+const BAN_LOGGER = process.env.BAN_LOGGER;
+const UNBAN_LOGGER = process.env.UNBAN_LOGGER;
+const TIMEOUT_LOGGER = process.env.TIMEOUT_LOGGER;
+
+// System State
 const botSettings = {
   bannedWords: ['badword1', 'scamlink'],
   antiInvite: true,
@@ -53,7 +58,6 @@ const botSettings = {
   maxWarningsBeforeBan: 3,
 };
 
-const modmailThreads = new Map();
 const chatLogs = [];
 const actionLogs = [];
 const userWarnings = new Map();
@@ -67,7 +71,26 @@ function requireAuth(req, res, next) {
   next();
 }
 
-// --- AUTOMATED MODERATION & CHAT LOGGING ---
+// --- LOGGING HELPER ---
+async function logToDiscordChannel(channelId, title, description, color = '#635bff') {
+  if (!channelId) return;
+  try {
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) return;
+
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(description)
+      .setColor(color)
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+  } catch (err) {
+    console.error(`Failed to dispatch log to channel ${channelId}:`, err.message);
+  }
+}
+
+// --- AUTOMATED MODERATION & CHAT LISTENER ---
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild || message.guild.id !== GUILD_ID) return;
 
@@ -75,14 +98,14 @@ client.on('messageCreate', async (message) => {
   const userId = message.author.id;
   const member = message.member;
 
-  // 1. Anti-Invite Filter
+  // Anti-Invite
   if (botSettings.antiInvite && /(discord\.gg|discord\.com\/invite)\//i.test(content)) {
     await message.delete().catch(() => {});
     if (member) await issueWarning(member, 'Posting Discord Invite Links');
     return;
   }
 
-  // 2. Banned Words Filter
+  // Banned Words
   const containsBanned = botSettings.bannedWords.some(word => 
     word.length > 0 && content.toLowerCase().includes(word.toLowerCase())
   );
@@ -92,7 +115,7 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // 3. Anti-Spam Filter (5 messages within 3s)
+  // Anti-Spam (5 msgs in 3s)
   if (botSettings.antiSpam) {
     const now = Date.now();
     const timestamps = userSpamCache.get(userId) || [];
@@ -108,7 +131,7 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // Record Chat Log
+  // Record Chat History
   chatLogs.unshift({
     id: message.id,
     user: message.author.tag,
@@ -120,7 +143,37 @@ client.on('messageCreate', async (message) => {
   if (chatLogs.length > 100) chatLogs.pop();
 });
 
-// Helper Function for Warning System
+// Automated Ban Listener (Detect Native Discord App Bans)
+client.on('guildBanAdd', async (ban) => {
+  if (ban.guild.id !== GUILD_ID || !BAN_LOGGER) return;
+
+  try {
+    const fetchedLogs = await ban.guild.fetchAuditLogs({
+      limit: 1,
+      type: AuditLogEvent.MemberBanAdd,
+    }).catch(() => null);
+
+    const banLog = fetchedLogs?.entries.first();
+    let executor = 'Unknown Moderator';
+    let reason = ban.reason || 'No reason specified';
+
+    if (banLog && banLog.target.id === ban.user.id) {
+      executor = banLog.executor.tag;
+      if (banLog.reason) reason = banLog.reason;
+    }
+
+    await logToDiscordChannel(
+      BAN_LOGGER,
+      '⛔ User Banned (Native Discord)',
+      `**Target:** ${ban.user.tag} (${ban.user.id})\n**Moderator:** ${executor}\n**Reason:** ${reason}`,
+      '#e63946'
+    );
+  } catch (err) {
+    console.error('Failed to process native ban log:', err.message);
+  }
+});
+
+// Warning System Helper
 async function issueWarning(member, reason) {
   const userId = member.id;
   const currentWarns = (userWarnings.get(userId) || 0) + 1;
@@ -144,11 +197,17 @@ async function issueWarning(member, reason) {
       reason: `Exceeded warning limit (${botSettings.maxWarningsBeforeBan})`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     });
+    
+    await logToDiscordChannel(
+      BAN_LOGGER,
+      '⛔ Auto-Ban Triggered',
+      `**Target:** ${member.user.tag} (${member.id})\n**Reason:** Exceeded Warning Threshold (${botSettings.maxWarningsBeforeBan})`,
+      '#e63946'
+    );
   }
 }
 
-// --- DISCORD OAUTH2 ROUTES ---
-
+// --- DISCORD OAUTH2 ENDPOINTS ---
 app.get('/api/auth/login', (req, res) => {
   const redirect = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
   res.redirect(redirect);
@@ -173,11 +232,7 @@ app.get('/api/auth/callback', async (req, res) => {
     });
 
     const tokens = await tokenResponse.json();
-
-    if (!tokens.access_token) {
-      console.error('OAuth token exchange failed:', tokens);
-      return res.status(400).send(`Failed to exchange code. Response: ${JSON.stringify(tokens)}`);
-    }
+    if (!tokens.access_token) return res.status(400).send(`Failed to exchange authorization code.`);
 
     const userRes = await fetch('https://discord.com/api/users/@me', {
       headers: { authorization: `${tokens.token_type} ${tokens.access_token}` },
@@ -188,13 +243,12 @@ app.get('/api/auth/callback', async (req, res) => {
     const member = await guild.members.fetch(user.id).catch(() => null);
 
     if (!member || (!member.permissions.has('Administrator') && !member.permissions.has('ManageMessages'))) {
-      return res.status(403).send('<h2>Access Denied: You need Administrator or Moderator permissions to access this panel.</h2>');
+      return res.status(403).send('<h2>Access Denied: Requires Administrator or Moderator permissions.</h2>');
     }
 
     req.session.user = { id: user.id, username: user.username, avatar: user.avatar };
     res.redirect('/');
   } catch (err) {
-    console.error('OAuth processing error:', err);
     res.status(500).send('Authentication Error: ' + err.message);
   }
 });
@@ -208,8 +262,7 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// --- API ENDPOINTS ---
-
+// --- REST API ROUTES ---
 app.get('/api/stats', requireAuth, async (req, res) => {
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
@@ -249,6 +302,52 @@ app.get('/api/members', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/bans', requireAuth, async (req, res) => {
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const bans = await guild.bans.fetch();
+
+    const banList = bans.map(b => ({
+      id: b.user.id,
+      username: b.user.tag,
+      avatar: b.user.displayAvatarURL({ extension: 'png' }),
+      reason: b.reason || 'No reason provided'
+    }));
+
+    res.json(banList);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/unban', requireAuth, async (req, res) => {
+  const { userId, reason } = req.body;
+  if (!userId || !reason) return res.status(400).json({ error: 'Missing User ID or reason.' });
+
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    await guild.members.unban(userId, reason);
+
+    actionLogs.unshift({
+      type: 'Unban',
+      target: userId,
+      reason,
+      timestamp: new Date().toLocaleTimeString()
+    });
+
+    await logToDiscordChannel(
+      UNBAN_LOGGER,
+      '🔓 User Unbanned (Dashboard)',
+      `**Target ID:** ${userId}\n**Moderator:** @${req.session.user.username}\n**Reason:** ${reason}`,
+      '#2ec4b6'
+    );
+
+    res.json({ success: true, message: `Successfully unbanned user ID ${userId}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to unban user: ' + err.message });
+  }
+});
+
 app.post('/api/moderate', requireAuth, async (req, res) => {
   const { action, userId, reason, durationMinutes } = req.body;
   if (!userId || !reason) return res.status(400).json({ error: 'Missing target User ID or reason.' });
@@ -259,6 +358,14 @@ app.post('/api/moderate', requireAuth, async (req, res) => {
     if (action === 'Ban member') {
       await guild.members.ban(userId, { reason });
       actionLogs.unshift({ type: 'Ban', target: userId, reason, timestamp: new Date().toLocaleTimeString() });
+
+      await logToDiscordChannel(
+        BAN_LOGGER,
+        '⛔ User Banned (Dashboard)',
+        `**Target ID:** ${userId}\n**Moderator:** @${req.session.user.username}\n**Reason:** ${reason}`,
+        '#e63946'
+      );
+
       return res.json({ success: true, message: `Banned user ID ${userId}` });
     }
 
@@ -275,6 +382,14 @@ app.post('/api/moderate', requireAuth, async (req, res) => {
       const duration = (durationMinutes || 10) * 60 * 1000;
       await member.timeout(duration, reason);
       actionLogs.unshift({ type: 'Timeout', target: member.user.tag, reason: `${reason} (${durationMinutes}m)`, timestamp: new Date().toLocaleTimeString() });
+
+      await logToDiscordChannel(
+        TIMEOUT_LOGGER,
+        '⏱️ User Timed Out',
+        `**Target:** ${member.user.tag} (${member.id})\n**Moderator:** @${req.session.user.username}\n**Duration:** ${durationMinutes}m\n**Reason:** ${reason}`,
+        '#ffb703'
+      );
+
       return res.json({ success: true, message: `Timed out ${member.user.tag} for ${durationMinutes}m.` });
     }
 
@@ -295,7 +410,6 @@ app.post('/api/settings', requireAuth, (req, res) => {
   res.json({ success: true, settings: botSettings });
 });
 
-// --- RESTORED BROADCAST & WARNING ROUTES ---
 app.post('/api/broadcast', requireAuth, async (req, res) => {
   const { channelId, title, message } = req.body;
   if (!channelId || !message) return res.status(400).json({ error: 'Missing channel or message text.' });
@@ -334,13 +448,12 @@ app.post('/api/warn', requireAuth, async (req, res) => {
 app.get('/api/logs', requireAuth, (req, res) => res.json(chatLogs));
 app.get('/api/action-history', requireAuth, (req, res) => res.json(actionLogs));
 
-// --- CATCH-ALL ROUTE FOR FRONTEND ---
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// --- INITIALIZATION ---
+// System Boot
 const PORT = process.env.PORT || 3000;
 client.login(process.env.DISCORD_TOKEN).then(() => {
-  app.listen(PORT, () => console.log(`Sentinel System online on port ${PORT}`));
+  app.listen(PORT, () => console.log(`Sentinel Moderation Engine online on port ${PORT}`));
 });
