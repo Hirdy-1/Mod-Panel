@@ -7,7 +7,8 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- AUTH WALL -->
+
+  <!-- AUTH WALL (LOGIN SCREEN) -->
   <div id="authScreen" class="modal-backdrop show" style="background:#151827;">
     <div class="modal" style="text-align:center;">
       <h2>Sentinel Dashboard</h2>
@@ -16,19 +17,26 @@
     </div>
   </div>
 
+  <!-- MAIN DASHBOARD SHELL -->
   <div class="app-shell" id="appShell" style="display:none;">
+    
+    <!-- SIDEBAR NAVIGATION -->
     <aside class="sidebar">
-      <div class="brand"><div class="brand-mark">S</div><div><strong>Sentinel</strong><span>Moderation Suite</span></div></div>
+      <div class="brand">
+        <div class="brand-mark">S</div>
+        <div><strong>Sentinel</strong><span>Moderation Suite</span></div>
+      </div>
       <nav>
         <p class="nav-label">WORKSPACE</p>
         <a class="nav-item active" href="#overview" data-section="overview"><i>▦</i>Overview</a>
         <a class="nav-item" href="#members" data-section="members"><i>👥</i>Members</a>
-        <a class="nav-item" href="#logs" data-section="logs"><i>☷</i>Chat Logs</a>
+        <a class="nav-item" href="#logs" data-section="logs"><i>☷</i>Logs & Activity</a>
         <a class="nav-item" href="#broadcast" data-section="broadcast"><i>📣</i>Broadcast</a>
         <a class="nav-item" href="#settings" data-section="settings"><i>⚙</i>Auto-Mod Settings</a>
       </nav>
     </aside>
 
+    <!-- MAIN CONTENT AREA -->
     <main class="main-content">
       <header class="topbar">
         <div class="crumbs">Sentinel Panel / <b id="pageName">Overview</b></div>
@@ -38,22 +46,107 @@
         </div>
       </header>
 
-      <!-- MEMBERS TAB WITH REAL-TIME PROFILE & QUICK ACTIONS -->
+      <!-- 1. OVERVIEW TAB -->
+      <section class="page-section active" id="overview">
+        <div class="page-heading">
+          <div><p class="eyebrow">METRICS</p><h1>Server Overview</h1></div>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-icon blue">👥</div><div><span>TOTAL HUMANS</span><strong id="statTotalMembers">--</strong></div></div>
+          <div class="stat-card"><div class="stat-icon green">🟢</div><div><span>ONLINE HUMANS</span><strong id="statOnlineMembers">--</strong></div></div>
+          <div class="stat-card"><div class="stat-icon red">⊘</div><div><span>SERVER BANS</span><strong id="statTotalBans">--</strong></div></div>
+        </div>
+      </section>
+
+      <!-- 2. MEMBERS TAB -->
       <section class="page-section" id="members">
-        <div class="page-heading"><div><p class="eyebrow">ROSTER</p><h1>Server Members</h1></div></div>
+        <div class="page-heading">
+          <div><p class="eyebrow">ROSTER</p><h1>Server Members</h1></div>
+        </div>
         <div class="panel">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>USER</th><th>ROLES</th><th>JOINED</th><th>WARNS</th><th>ACTIONS</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>USER</th>
+                  <th>ROLES</th>
+                  <th>JOINED</th>
+                  <th>WARNS</th>
+                  <th>ACTIONS</th>
+                </tr>
+              </thead>
               <tbody id="membersTable"></tbody>
             </table>
           </div>
         </div>
       </section>
 
-      <!-- AUTO-MOD SETTINGS TAB -->
+      <!-- 3. LOGS TAB -->
+      <section class="page-section" id="logs">
+        <div class="page-heading">
+          <div><p class="eyebrow">AUDIT</p><h1>Chat & Action Logs</h1></div>
+        </div>
+        <div class="panel" style="margin-bottom: 20px;">
+          <h3>Recent Chat Activity</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>TIME</th>
+                  <th>USER</th>
+                  <th>CHANNEL</th>
+                  <th>MESSAGE</th>
+                </tr>
+              </thead>
+              <tbody id="logsTable"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>Moderation Action Logs</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>TIME</th>
+                  <th>ACTION</th>
+                  <th>TARGET</th>
+                  <th>REASON</th>
+                </tr>
+              </thead>
+              <tbody id="actionLogsTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. BROADCAST TAB -->
+      <section class="page-section" id="broadcast">
+        <div class="page-heading">
+          <div><p class="eyebrow">COMMUNICATION</p><h1>Server Broadcast & Warn</h1></div>
+        </div>
+        <div class="settings-grid">
+          <div class="panel setting-card">
+            <h3>Channel Announcement</h3>
+            <label>Channel ID<input id="broadcastChannel" placeholder="e.g. 1048...892" /></label>
+            <label>Title<input id="broadcastTitle" placeholder="Announcement Title" /></label>
+            <label>Message<textarea id="broadcastBody" placeholder="Embed content..."></textarea></label>
+            <button class="primary-btn" id="sendBroadcastBtn">Send Embed Announcement</button>
+          </div>
+          <div class="panel setting-card">
+            <h3>Direct DM Warning</h3>
+            <label>Target User ID<input id="warnUserId" placeholder="Target Discord User ID" /></label>
+            <label>Reason<textarea id="warnReason" placeholder="Reason for warning..."></textarea></label>
+            <button class="danger-btn" id="sendWarnBtn">Issue Official DM Warning</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. AUTO-MOD SETTINGS TAB -->
       <section class="page-section" id="settings">
-        <div class="page-heading"><div><p class="eyebrow">AUTOMATION</p><h1>Auto-Moderation Settings</h1></div></div>
+        <div class="page-heading">
+          <div><p class="eyebrow">AUTOMATION</p><h1>Auto-Moderation Settings</h1></div>
+        </div>
         <div class="settings-grid">
           <div class="panel setting-card">
             <h3>Automated Rules</h3>
@@ -73,39 +166,9 @@
         </div>
       </section>
 
-      <!-- BROADCAST / DIRECT ANNOUNCEMENTS TAB -->
-      <section class="page-section" id="broadcast">
-        <div class="page-heading"><div><p class="eyebrow">COMMUNICATION</p><h1>Server Broadcast & Warn</h1></div></div>
-        <div class="settings-grid">
-          <div class="panel setting-card">
-            <h3>Channel Announcement</h3>
-            <label>Channel ID<input id="broadcastChannel" placeholder="e.g. 1048...892" /></label>
-            <label>Title<input id="broadcastTitle" placeholder="Announcement Title" /></label>
-            <label>Message<textarea id="broadcastBody" placeholder="Embed content..."></textarea></label>
-            <button class="primary-btn" id="sendBroadcastBtn">Send Embed Announcement</button>
-          </div>
-          <div class="panel setting-card">
-            <h3>Direct DM Warning</h3>
-            <label>Target User ID<input id="warnUserId" placeholder="Target Discord User ID" /></label>
-            <label>Reason<textarea id="warnReason" placeholder="Reason for warning..."></textarea></label>
-            <button class="danger-btn" id="sendWarnBtn">Issue Official DM Warning</button>
-          </div>
-        </div>
-      </section>
-      
-      <!-- OVERVIEW & LOGS -->
-      <section class="page-section active" id="overview">
-        <div class="stats-grid">
-          <div class="stat-card"><div class="stat-icon blue">👥</div><div><span>TOTAL HUMANS</span><strong id="statTotalMembers">--</strong></div></div>
-          <div class="stat-card"><div class="stat-icon green">🟢</div><div><span>ONLINE HUMANS</span><strong id="statOnlineMembers">--</strong></div></div>
-          <div class="stat-card"><div class="stat-icon red">⊘</div><div><span>SERVER BANS</span><strong id="statTotalBans">--</strong></div></div>
-        </div>
-      </section>
-      <section class="page-section" id="logs">
-        <div class="panel"><div class="table-wrap"><table><tbody id="logsTable"></tbody></table></div></div>
-      </section>
     </main>
   </div>
+
   <div class="toast" id="toast"></div>
   <script src="script.js"></script>
 </body>
