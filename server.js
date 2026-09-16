@@ -71,7 +71,7 @@ function requireAuth(req, res, next) {
   next();
 }
 
-// --- LOGGING HELPER ---
+// --- DISCORD EMBED LOGGER HELPER ---
 async function logToDiscordChannel(channelId, title, description, color = '#635bff') {
   if (!channelId) return;
   try {
@@ -115,7 +115,7 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // Anti-Spam (5 msgs in 3s)
+  // Anti-Spam
   if (botSettings.antiSpam) {
     const now = Date.now();
     const timestamps = userSpamCache.get(userId) || [];
@@ -143,7 +143,7 @@ client.on('messageCreate', async (message) => {
   if (chatLogs.length > 100) chatLogs.pop();
 });
 
-// Automated Ban Listener (Detect Native Discord App Bans)
+// Auto-Detect Bans Made Inside Discord Desktop/Mobile App
 client.on('guildBanAdd', async (ban) => {
   if (ban.guild.id !== GUILD_ID || !BAN_LOGGER) return;
 
@@ -302,6 +302,7 @@ app.get('/api/members', requireAuth, async (req, res) => {
   }
 });
 
+// FETCH LIVE DISCORD BANS DIRECTLY
 app.get('/api/bans', requireAuth, async (req, res) => {
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
@@ -310,16 +311,17 @@ app.get('/api/bans', requireAuth, async (req, res) => {
     const banList = bans.map(b => ({
       id: b.user.id,
       username: b.user.tag,
-      avatar: b.user.displayAvatarURL({ extension: 'png' }),
-      reason: b.reason || 'No reason provided'
+      avatar: b.user.displayAvatarURL({ extension: 'png', forceStatic: true }),
+      reason: b.reason || 'No reason provided in Discord'
     }));
 
     res.json(banList);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Could not fetch ban list from Discord: ' + err.message });
   }
 });
 
+// UNBAN DIRECTLY ON DISCORD & LOG TO UNBAN_LOGGER
 app.post('/api/unban', requireAuth, async (req, res) => {
   const { userId, reason } = req.body;
   if (!userId || !reason) return res.status(400).json({ error: 'Missing User ID or reason.' });
@@ -348,6 +350,7 @@ app.post('/api/unban', requireAuth, async (req, res) => {
   }
 });
 
+// BAN / KICK / TIMEOUT ACTIONS WITH LOGGERS
 app.post('/api/moderate', requireAuth, async (req, res) => {
   const { action, userId, reason, durationMinutes } = req.body;
   if (!userId || !reason) return res.status(400).json({ error: 'Missing target User ID or reason.' });
@@ -452,8 +455,8 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// System Boot
+// Boot Server
 const PORT = process.env.PORT || 3000;
 client.login(process.env.DISCORD_TOKEN).then(() => {
-  app.listen(PORT, () => console.log(`Sentinel Moderation Engine online on port ${PORT}`));
+  app.listen(PORT, () => console.log(`Sentinel Engine online on port ${PORT}`));
 });
