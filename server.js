@@ -6,7 +6,7 @@ const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.j
 
 const app = express();
 
-// --- CRITICAL FOR RENDER DEPLOYMENTS ---
+// --- CRITICAL FOR RENDER REVERSE PROXIES ---
 app.set('trust proxy', 1);
 
 // --- MIDDLEWARE SETUP ---
@@ -65,6 +65,86 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Unauthorized. Please login with Discord.' });
   }
   next();
+}
+
+// --- AUTOMATED MODERATION & CHAT LOGGING ---
+client.on('messageCreate', async (message) => {
+  if (message.author.bot || !message.guild || message.guild.id !== GUILD_ID) return;
+
+  const content = message.content;
+  const userId = message.author.id;
+  const member = message.member;
+
+  // 1. Anti-Invite Filter
+  if (botSettings.antiInvite && /(discord\.gg|discord\.com\/invite)\//i.test(content)) {
+    await message.delete().catch(() => {});
+    if (member) await issueWarning(member, 'Posting Discord Invite Links');
+    return;
+  }
+
+  // 2. Banned Words Filter
+  const containsBanned = botSettings.bannedWords.some(word => 
+    word.length > 0 && content.toLowerCase().includes(word.toLowerCase())
+  );
+  if (containsBanned) {
+    await message.delete().catch(() => {});
+    if (member) await issueWarning(member, 'Using Banned Vocabulary');
+    return;
+  }
+
+  // 3. Anti-Spam Filter (5 messages within 3s)
+  if (botSettings.antiSpam) {
+    const now = Date.now();
+    const timestamps = userSpamCache.get(userId) || [];
+    timestamps.push(now);
+    const recent = timestamps.filter(t => now - t < 3000);
+    userSpamCache.set(userId, recent);
+
+    if (recent.length >= 5) {
+      await message.delete().catch(() => {});
+      userSpamCache.set(userId, []);
+      if (member) await issueWarning(member, 'Rapid Message Spamming');
+      return;
+    }
+  }
+
+  // Record Chat Log
+  chatLogs.unshift({
+    id: message.id,
+    user: message.author.tag,
+    avatar: message.author.displayAvatarURL({ extension: 'png' }),
+    channel: `#${message.channel.name}`,
+    content: content || '[Media/Embed]',
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  });
+  if (chatLogs.length > 100) chatLogs.pop();
+});
+
+// Helper Function for Warning System
+async function issueWarning(member, reason) {
+  const userId = member.id;
+  const currentWarns = (userWarnings.get(userId) || 0) + 1;
+  userWarnings.set(userId, currentWarns);
+
+  await member.send(`⚠️ **Warning from Moderation**\nReason: ${reason}\nWarnings: ${currentWarns}/${botSettings.maxWarningsBeforeBan}`).catch(() => {});
+
+  actionLogs.unshift({
+    type: 'Warning',
+    target: member.user.tag,
+    reason: `${reason} (Warn #${currentWarns})`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  });
+
+  if (currentWarns >= botSettings.maxWarningsBeforeBan) {
+    await member.guild.members.ban(userId, { reason: `Auto-Ban: Exceeded warning limit (${botSettings.maxWarningsBeforeBan}).` }).catch(() => {});
+    userWarnings.delete(userId);
+    actionLogs.unshift({
+      type: 'Auto-Ban',
+      target: member.user.tag,
+      reason: `Exceeded warning limit (${botSettings.maxWarningsBeforeBan})`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    });
+  }
 }
 
 // --- DISCORD OAUTH2 ROUTES ---
@@ -213,6 +293,42 @@ app.post('/api/settings', requireAuth, (req, res) => {
   if (typeof antiSpam === 'boolean') botSettings.antiSpam = antiSpam;
   if (maxWarningsBeforeBan) botSettings.maxWarningsBeforeBan = Number(maxWarningsBeforeBan);
   res.json({ success: true, settings: botSettings });
+});
+
+// --- RESTORED BROADCAST & WARNING ROUTES ---
+app.post('/api/broadcast', requireAuth, async (req, res) => {
+  const { channelId, title, message } = req.body;
+  if (!channelId || !message) return res.status(400).json({ error: 'Missing channel or message text.' });
+
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased()) return res.status(400).json({ error: 'Target channel is invalid or non-text.' });
+
+    const embed = new EmbedBuilder()
+      .setTitle(title || 'Server Announcement')
+      .setDescription(message)
+      .setColor('#635bff')
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+    res.json({ success: true, message: `Announcement sent to #${channel.name}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/warn', requireAuth, async (req, res) => {
+  const { userId, reason } = req.body;
+  if (!userId || !reason) return res.status(400).json({ error: 'Missing user ID or reason.' });
+
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const member = await guild.members.fetch(userId);
+    await issueWarning(member, reason);
+    res.json({ success: true, message: `Issued warning DM to ${member.user.tag}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not send warning: ' + err.message });
+  }
 });
 
 app.get('/api/logs', requireAuth, (req, res) => res.json(chatLogs));
