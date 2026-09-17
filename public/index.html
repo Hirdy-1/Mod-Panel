@@ -3,237 +3,325 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sentinel Moderator Portal</title>
+  <title>Sentinel Command Panel</title>
   <style>
     :root {
-      --bg: #0f1117;
-      --panel: #161922;
-      --border: #232733;
+      --bg-dark: #0f1117;
+      --card-bg: #181b24;
+      --sidebar-bg: #13151f;
       --accent: #635bff;
-      --text: #e1e4ed;
-      --muted: #8b94a7;
+      --accent-hover: #5248e3;
       --danger: #e63946;
+      --danger-hover: #c82333;
+      --warning: #ffb703;
       --success: #2ec4b6;
+      --text: #ffffff;
+      --muted: #8b949e;
+      --border: #282d3c;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', -apple-system, sans-serif; }
+    body { background-color: var(--bg-dark); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
 
-    /* AUTH OVERLAY */
-    #authScreen { position: fixed; inset: 0; background: var(--bg); z-index: 1000; display: none; align-items: center; justify-content: center; }
-    #authScreen.show { display: flex; }
-    .auth-card { background: var(--panel); border: 1px solid var(--border); padding: 40px; border-radius: 12px; text-align: center; max-width: 400px; width: 90%; }
-    .auth-btn { background: var(--accent); color: white; border: 0; padding: 12px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; margin-top: 20px; }
+    /* AUTH SCREEN */
+    .auth-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(15, 17, 23, 0.95); display: none; align-items: center;
+      justify-content: center; flex-direction: column; z-index: 1000;
+      overflow-y: auto; padding: 20px;
+    }
+    .auth-overlay.show { display: flex; }
+    .auth-card {
+      background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+      padding: 40px; text-align: center; max-width: 420px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      margin-bottom: 30px;
+    }
+    .auth-card h1 { margin-bottom: 12px; font-size: 24px; }
+    .auth-card p { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
 
-    /* LAYOUT */
-    #appShell { display: flex; height: 100vh; }
-    sidebar { width: 240px; background: var(--panel); border-right: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; }
-    sidebar .logo { font-size: 1.2rem; font-weight: bold; color: var(--accent); margin-bottom: 30px; }
-    sidebar nav a { display: block; padding: 10px 14px; color: var(--muted); text-decoration: none; border-radius: 6px; margin-bottom: 6px; font-weight: 500; }
-    sidebar nav a.active, sidebar nav a:hover { background: rgba(99, 91, 255, 0.1); color: var(--accent); }
+    /* PUBLIC APPEAL SECTION */
+    .public-appeal-card {
+      background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+      padding: 30px; max-width: 420px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .public-appeal-card h3 { margin-bottom: 10px; font-size: 18px; text-align: center; }
+    .public-appeal-card p { color: var(--muted); font-size: 13px; margin-bottom: 20px; text-align: center; }
 
-    main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    header { height: 60px; border-bottom: 1px solid var(--border); padding: 0 30px; display: flex; align-items: center; justify-content: space-between; }
+    /* APP SHELL */
+    #appShell { display: flex; width: 100%; height: 100%; }
 
-    .content { flex: 1; padding: 30px; overflow-y: auto; }
+    /* SIDEBAR */
+    sidebar {
+      width: 250px; background: var(--sidebar-bg); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 20px; flex-shrink: 0;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: bold; margin-bottom: 30px; }
+    .brand-icon { width: 12px; height: 12px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 10px var(--accent); }
+    nav { display: flex; flex-direction: column; gap: 8px; flex-grow: 1; }
+    nav a {
+      color: var(--muted); text-decoration: none; padding: 12px 16px; border-radius: 8px;
+      font-size: 14px; font-weight: 500; transition: all 0.2s; cursor: pointer;
+    }
+    nav a:hover, nav a.active { background: rgba(99, 91, 255, 0.1); color: var(--text); }
+    nav a.active { border-left: 3px solid var(--accent); }
+
+    .user-profile {
+      display: flex; align-items: center; justify-content: space-between;
+      padding-top: 15px; border-top: 1px solid var(--border);
+    }
+    .user-meta { display: flex; flex-direction: column; }
+    .user-role-badge {
+      display: inline-block; font-size: 10px; font-weight: bold; padding: 2px 6px;
+      border-radius: 4px; background: var(--accent); color: white; text-transform: uppercase; margin-top: 4px;
+    }
+
+    /* MAIN CONTENT AREA */
+    main { flex-grow: 1; display: flex; flex-direction: column; overflow-y: auto; }
+    header {
+      height: 70px; border-bottom: 1px solid var(--border); display: flex;
+      align-items: center; justify-content: space-between; padding: 0 30px; background: var(--sidebar-bg);
+    }
+    .content-area { padding: 30px; flex-grow: 1; }
+
     .page-section { display: none; }
     .page-section.active { display: block; }
 
-    /* CARDS & PANELS */
-    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 25px; }
-    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
-    .card h4 { color: var(--muted); font-size: 0.85rem; text-transform: uppercase; margin-bottom: 10px; }
-    .card .val { font-size: 1.8rem; font-weight: bold; }
-
-    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 25px; }
-    .panel h3 { margin-bottom: 15px; font-size: 1.1rem; }
+    /* STAT CARDS */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+    .stat-card { background: var(--card-bg); border: 1px solid var(--border); padding: 20px; border-radius: 10px; }
+    .stat-card small { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-card h2 { font-size: 28px; margin-top: 8px; }
 
     /* TABLES */
-    .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; text-align: left; }
-    th { padding: 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
-    td { padding: 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
-    
-    .pill { padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; display: inline-block; }
-    
-    /* BUTTONS & INPUTS */
-    button { background: var(--accent); color: white; border: 0; padding: 8px 14px; border-radius: 4px; font-weight: 500; cursor: pointer; }
-    button.secondary-btn { background: #2b3040; color: var(--text); }
-    button.danger-btn { background: var(--danger); }
-    input, textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px; border-radius: 6px; margin-bottom: 15px; }
+    .table-container { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 20px; }
+    .table-toolbar { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
+    th, td { padding: 14px 20px; border-bottom: 1px solid var(--border); }
+    th { background: rgba(0,0,0,0.2); color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+    tr:last-child td { border-bottom: none; }
 
-    /* TOAST */
-    #toast { position: fixed; bottom: 20px; right: 20px; background: var(--accent); color: white; padding: 12px 20px; border-radius: 6px; font-weight: 500; display: none; z-index: 2000; }
-    #toast.show { display: block; }
+    /* BUTTONS & BADGES */
+    button {
+      padding: 8px 14px; border-radius: 6px; border: none; font-size: 13px;
+      font-weight: 600; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .primary-btn { background: var(--accent); color: white; }
+    .primary-btn:hover { background: var(--accent-hover); }
+    .secondary-btn { background: #2b3040; color: white; }
+    .secondary-btn:hover { background: #3a4156; }
+    .danger-btn { background: var(--danger); color: white; }
+    .danger-btn:hover { background: var(--danger-hover); }
+    .pill { padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+
+    /* FORMS */
+    .form-group { margin-bottom: 20px; }
+    .form-group label { display: block; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
+    input[type="text"], input[type="number"], textarea, select {
+      width: 100%; background: var(--bg-dark); border: 1px solid var(--border); color: white;
+      padding: 10px 14px; border-radius: 6px; font-size: 14px; outline: none;
+    }
+    input[type="text"]:focus, textarea:focus { border-color: var(--accent); }
+
+    /* TOAST NOTIFICATION */
+    #toast {
+      position: fixed; bottom: 20px; right: 20px; background: var(--card-bg);
+      border: 1px solid var(--accent); padding: 12px 20px; border-radius: 8px;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.5); transform: translateY(100px); opacity: 0; transition: all 0.3s;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
   </style>
 </head>
 <body>
 
-  <!-- AUTH SCREEN -->
-  <div id="authScreen" class="show">
+  <!-- AUTHENTICATION & PUBLIC APPEAL OVERLAY -->
+  <div id="authScreen" class="auth-overlay show">
     <div class="auth-card">
-      <h2>Sentinel Moderation</h2>
-      <p style="color: var(--muted); margin-top: 8px;">Log in using your Discord credentials to access management controls.</p>
-      <a href="/api/auth/login" class="auth-btn">Log In With Discord</a>
+      <div class="brand-icon" style="margin: 0 auto 15px auto; width: 20px; height: 20px;"></div>
+      <h1>Sentinel Control</h1>
+      <p>Log in with your Discord account to access the staff moderation engine.</p>
+      <a href="/api/auth/login"><button class="primary-btn" style="width: 100%; justify-content: center; padding: 12px;">Login with Discord</button></a>
+    </div>
+
+    <div class="public-appeal-card">
+      <h3>Banned? Submit an Appeal</h3>
+      <p>If you were banned from the server, submit your details below for review.</p>
+      <form id="publicAppealForm">
+        <div class="form-group">
+          <label>Discord User ID</label>
+          <input type="text" id="appealUserId" placeholder="e.g. 123456789012345678" required>
+        </div>
+        <div class="form-group">
+          <label>Discord Tag / Username</label>
+          <input type="text" id="appealUsername" placeholder="e.g. john_doe" required>
+        </div>
+        <div class="form-group">
+          <label>Appeal Reason / Statement</label>
+          <textarea id="appealStatement" rows="4" placeholder="Explain why your ban should be lifted..." required></textarea>
+        </div>
+        <button type="submit" class="secondary-btn" style="width: 100%; justify-content: center;">Submit Ban Appeal</button>
+      </form>
     </div>
   </div>
 
-  <!-- APP INTERFACE -->
+  <!-- MAIN PANEL APPLICATION -->
   <div id="appShell" style="display: none;">
+    
     <sidebar>
-      <div class="logo">🛡️ Sentinel</div>
+      <div class="brand">
+        <div class="brand-icon"></div>
+        <span>Sentinel Engine</span>
+      </div>
+
       <nav>
-        <a href="#" data-section="overview" class="active">Overview</a>
-        <a href="#" data-section="members">Members & Bans</a>
-        <a href="#" data-section="actions">Broadcasting</a>
-        <a href="#" data-section="settings">Auto-Mod Settings</a>
-        <a href="#" data-section="logs">Activity Logs</a>
+        <a class="active" data-section="secDashboard">Overview</a>
+        <a data-section="secMembers">Guild Members</a>
+        <a data-section="secBans">Ban Registry</a>
+        <a data-section="secAppeals">Ban Appeals</a>
+        <a data-section="secBroadcast">Announcements</a>
+        <a data-section="secLogs">Audit & Chat Feed</a>
+        <a data-section="secSettings">Bot Settings</a>
       </nav>
+
+      <div class="user-profile">
+        <div class="user-meta">
+          <span id="userTag" style="font-weight: 600; font-size: 13px;">@User</span>
+          <span id="userRoleBadge" class="user-role-badge">Moderator</span>
+        </div>
+        <button id="logoutBtn" class="secondary-btn" style="padding: 4px 8px; font-size: 11px;">Logout</button>
+      </div>
     </sidebar>
 
     <main>
       <header>
-        <div>Current Section: <b id="pageName">Overview</b></div>
-        <div>
-          <span id="userTag" style="margin-right: 15px; color: var(--muted);"></span>
-          <button id="logoutBtn" class="secondary-btn">Logout</button>
-        </div>
+        <h2 id="pageName" style="font-size: 18px;">Overview</h2>
+        <span class="pill" style="background: rgba(46, 196, 182, 0.1); color: var(--success); border: 1px solid var(--success);">Bot Online</span>
       </header>
 
-      <div class="content">
-        <!-- OVERVIEW PAGE -->
-        <div id="overview" class="page-section active">
-          <div class="grid-3">
-            <div class="card">
-              <h4>Total Members</h4>
-              <div class="val" id="statTotalMembers">--</div>
-            </div>
-            <div class="card">
-              <h4>Online Members</h4>
-              <div class="val" id="statOnlineMembers">--</div>
-            </div>
-            <div class="card">
-              <h4>Active Server Bans</h4>
-              <div class="val" id="statTotalBans">--</div>
-            </div>
-          </div>
-        </div>
+      <div class="content-area">
 
-        <!-- MEMBERS & BANS PAGE -->
-        <div id="members" class="page-section">
-          <div class="panel">
-            <h3>Active Guild Members</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>USER</th>
-                    <th>ROLES</th>
-                    <th>JOINED</th>
-                    <th>WARNS</th>
-                    <th>ACTIONS</th>
-                  </tr>
-                </thead>
-                <tbody id="membersTable"></tbody>
-              </table>
-            </div>
+        <!-- 1. DASHBOARD OVERVIEW -->
+        <section id="secDashboard" class="page-section active">
+          <div class="stats-grid">
+            <div class="stat-card"><small>Total Members</small><h2 id="statTotalMembers">0</h2></div>
+            <div class="stat-card"><small>Online Now</small><h2 id="statOnlineMembers">0</h2></div>
+            <div class="stat-card"><small>Active Guild Bans</small><h2 id="statTotalBans">0</h2></div>
           </div>
 
-          <div class="panel">
-            <h3>Banned Users</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>USER</th>
-                    <th>BAN REASON</th>
-                    <th>ACTION</th>
-                  </tr>
-                </thead>
-                <tbody id="bansTable"></tbody>
-              </table>
+          <div class="table-container">
+            <div class="table-toolbar"><b>Recent Staff Activity</b></div>
+            <table>
+              <thead><tr><th>Timestamp</th><th>Action</th><th>Target</th><th>Reason</th></tr></thead>
+              <tbody id="actionLogsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 2. MEMBERS MANAGEMENT -->
+        <section id="secMembers" class="page-section">
+          <div class="table-container">
+            <div class="table-toolbar">
+              <b>Server Members</b>
+              <small style="color: var(--muted);">Direct Moderation Controls</small>
             </div>
+            <table>
+              <thead><tr><th>Member</th><th>Roles</th><th>Joined</th><th>Warnings</th><th>Actions</th></tr></thead>
+              <tbody id="membersTable"></tbody>
+            </table>
           </div>
-        </div>
+        </section>
 
-        <!-- BROADCASTING PAGE -->
-        <div id="actions" class="page-section">
-          <div class="panel">
-            <h3>Send Channel Announcement</h3>
-            <input type="text" id="broadcastChannel" placeholder="Discord Channel ID (e.g. 123456789...)" />
-            <input type="text" id="broadcastTitle" placeholder="Announcement Title" />
-            <textarea id="broadcastBody" rows="4" placeholder="Announcement content..."></textarea>
-            <button id="sendBroadcastBtn">Publish Announcement</button>
-          </div>
-
-          <div class="panel">
-            <h3>Direct Warning Notice</h3>
-            <input type="text" id="warnUserId" placeholder="Target User ID" />
-            <input type="text" id="warnReason" placeholder="Reason for Warning" />
-            <button id="sendWarnBtn" class="danger-btn">Dispatch Direct Warning</button>
-          </div>
-        </div>
-
-        <!-- SETTINGS PAGE -->
-        <div id="settings" class="page-section">
-          <div class="panel">
-            <h3>Automated Moderation Controls</h3>
-            <label style="display:block; margin-bottom: 10px;">
-              <input type="checkbox" id="antiInviteToggle" style="width:auto;"> Block Discord Invite Links
-            </label>
-            <label style="display:block; margin-bottom: 15px;">
-              <input type="checkbox" id="antiSpamToggle" style="width:auto;"> Enable Anti-Spam (5 msgs / 3s)
-            </label>
-            <label style="display:block; margin-bottom: 5px;">Max Warnings Before Automatic Ban:</label>
-            <input type="number" id="maxWarnsInput" value="3" />
-            <label style="display:block; margin-bottom: 5px;">Banned Keywords (comma-separated):</label>
-            <input type="text" id="bannedWordsInput" placeholder="word1, word2, badsite.com" />
-            <button id="saveSettingsBtn">Save Moderation Rules</button>
-          </div>
-        </div>
-
-        <!-- LOGS PAGE -->
-        <div id="logs" class="page-section">
-          <div class="panel">
-            <h3>Audit Action History</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>TIME</th>
-                    <th>ACTION</th>
-                    <th>TARGET</th>
-                    <th>REASON</th>
-                  </tr>
-                </thead>
-                <tbody id="actionLogsTable"></tbody>
-              </table>
+        <!-- 3. BAN REGISTRY & BULK ACTIONS -->
+        <section id="secBans" class="page-section">
+          <div class="table-container">
+            <div class="table-toolbar">
+              <b>Live Discord Ban List</b>
+              <button class="danger-btn" onclick="executeBatchUnban()">Bulk Unban Selected</button>
             </div>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 40px;"><input type="checkbox" id="selectAllBans" onclick="toggleSelectAllBans(this)"></th>
+                  <th>Banned User</th>
+                  <th>Reason</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="bansTable"></tbody>
+            </table>
           </div>
+        </section>
 
-          <div class="panel">
-            <h3>Recent Message Feed</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>TIME</th>
-                    <th>USER</th>
-                    <th>CHANNEL</th>
-                    <th>MESSAGE</th>
-                  </tr>
-                </thead>
-                <tbody id="logsTable"></tbody>
-              </table>
-            </div>
+        <!-- 4. BAN APPEALS MANAGEMENT -->
+        <section id="secAppeals" class="page-section">
+          <div class="table-container">
+            <div class="table-toolbar"><b>Submitted Ban Appeals</b></div>
+            <table>
+              <thead><tr><th>Date</th><th>User ID</th><th>Statement / Reason</th><th>Status</th><th>Review Action</th></tr></thead>
+              <tbody id="appealsTable"></tbody>
+            </table>
           </div>
-        </div>
+        </section>
+
+        <!-- 5. ANNOUNCEMENTS / BROADCAST -->
+        <section id="secBroadcast" class="page-section">
+          <div class="table-container" style="padding: 24px; max-width: 600px;">
+            <h3 style="margin-bottom: 16px;">Dispatch Announcement Embed</h3>
+            <div class="form-group">
+              <label>Target Channel ID</label>
+              <input type="text" id="broadcastChannel" placeholder="e.g. 123456789012345678">
+            </div>
+            <div class="form-group">
+              <label>Embed Title</label>
+              <input type="text" id="broadcastTitle" placeholder="Announcement Title">
+            </div>
+            <div class="form-group">
+              <label>Embed Message Body</label>
+              <textarea id="broadcastBody" rows="5" placeholder="Write message..."></textarea>
+            </div>
+            <button id="sendBroadcastBtn" class="primary-btn">Publish Announcement</button>
+          </div>
+        </section>
+
+        <!-- 6. AUDIT & CHAT FEED -->
+        <section id="secLogs" class="page-section">
+          <div class="table-container">
+            <div class="table-toolbar"><b>Real-time Chat Feed</b></div>
+            <table>
+              <thead><tr><th>Time</th><th>User</th><th>Channel</th><th>Message Content</th></tr></thead>
+              <tbody id="logsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 7. BOT SETTINGS -->
+        <section id="secSettings" class="page-section">
+          <div class="table-container" style="padding: 24px; max-width: 600px;">
+            <h3 style="margin-bottom: 20px;">Automated Security Shields</h3>
+            <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+              <input type="checkbox" id="antiInviteToggle">
+              <label style="margin: 0;">Anti-Invite Filter (Auto-delete Discord links)</label>
+            </div>
+            <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+              <input type="checkbox" id="antiSpamToggle">
+              <label style="margin: 0;">Anti-Spam Filter (Block fast repeat messages)</label>
+            </div>
+            <div class="form-group">
+              <label>Warnings Before Auto-Ban Threshold</label>
+              <input type="number" id="maxWarnsInput" min="1" max="10">
+            </div>
+            <div class="form-group">
+              <label>Banned Vocabulary (Comma Separated)</label>
+              <input type="text" id="bannedWordsInput">
+            </div>
+            <button id="saveSettingsBtn" class="primary-btn">Save Configuration</button>
+          </div>
+        </section>
 
       </div>
     </main>
   </div>
 
-  <div id="toast">Notice Updated</div>
+  <div id="toast">Operation successfully completed!</div>
 
   <script src="/script.js"></script>
 </body>
